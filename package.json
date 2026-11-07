@@ -1,0 +1,26 @@
+{
+  "name": "work-hours-tracker-local",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Work hours & payout tracker. Runs entirely in the browser; data stays on the device.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/*.test.js",
+    "build:flat": "vite build --config vite.flat.config.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.2.1",
+    "vite": "^8.3.5"
+  }
+}
