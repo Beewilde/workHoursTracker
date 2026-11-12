@@ -17,27 +17,33 @@ export const spanMin = (tin, tout) => {
 export const regHours = (e) =>
   e && (e.status === 'worked' || e.status === 'training') ? spanMin(e.time_in, e.time_out) / 60 : 0
 // Shared PAID lunch: a full shift is 8 worked hours plus 1 hour of lunch that is paid at the same rate.
-// The lunch time is split EQUALLY between the workers who worked that day and ADDED to their time
-// (2 workers: +30 min each, 3 workers: +20 min each). Training hours get no lunch.
-//   cfg: { auto, minutes, threshold, from, override, date }
-//   override = lunch hours entered by hand for that day ('' / null = automatic)
+// By default the lunch hour is split EQUALLY between the workers who worked that day and ADDED to their time
+// (2 workers: +30 min each, 3 workers: +20 min each). Training and rest-day OT get no automatic lunch.
+// The owner can also GIVE lunch minutes to specific people (entry.lunch_min, even someone who did not work):
+// those minutes are taken out of the day's lunch pool and the rest is split between everyone left on automatic.
+//   cfg: { auto, minutes, threshold, from, override, date }; override = lunch hours for the day ('' = automatic)
+const hasMan = (e) => e.lunch_min !== null && e.lunch_min !== undefined && e.lunch_min !== '' && Number.isFinite(Number(e.lunch_min))
 export function lunchPlan(entries, cfg = {}) {
   const { auto = true, minutes = 60, threshold = 8, from = null, override = null, date = null } = cfg
   const worked = entries.filter((e) => e.status === 'worked' && spanMin(e.time_in, e.time_out) > 0)
   const elapsed = worked.reduce((s, e) => s + spanMin(e.time_in, e.time_out), 0) / 60
-  const none = { totalMin: 0, perMin: 0, n: worked.length, elapsed, source: 'none' }
-  if (!worked.length) return none
-  if (from && date && date < from) return { ...none, source: 'before-start' }
-  const manual = override !== null && override !== undefined && override !== '' && Number.isFinite(Number(override))
-  let totalMin = 0, source = 'none'
-  if (manual) { totalMin = Number(override) * 60; source = 'manual' }
-  else if (auto && elapsed >= threshold - 1e-9) { totalMin = minutes; source = 'auto' }
-  return { totalMin, perMin: totalMin / worked.length, n: worked.length, elapsed, source }
+  const blocked = !!(from && date && date < from)
+  const manualOverride = override !== null && override !== undefined && override !== '' && Number.isFinite(Number(override))
+  let pool = 0, source = 'none'
+  if (blocked) source = 'before-start'
+  else if (manualOverride) { pool = Number(override) * 60; source = 'manual' }
+  else if (auto && worked.length && elapsed >= threshold - 1e-9) { pool = minutes; source = 'auto' }
+  const givenTo = blocked ? [] : entries.filter(hasMan)
+  const given = givenTo.reduce((s, e) => s + Number(e.lunch_min), 0)
+  const autoWorkers = worked.filter((e) => !hasMan(e))
+  const perMin = autoWorkers.length ? Math.max(0, pool - given) / autoWorkers.length : 0
+  const minFor = (e) => (!e || blocked ? 0 : hasMan(e) ? Number(e.lunch_min) : e.status === 'worked' ? perMin : 0)
+  return { poolMin: pool, totalMin: given + perMin * autoWorkers.length, perMin, n: worked.length, autoN: autoWorkers.length, givenMin: given, givenN: givenTo.length, elapsed, source, minFor }
 }
 // paid hours of one entry = worked time + its share of the paid lunch
 export const paidHours = (e, plan) => {
   const el = e && (e.status === 'worked' || e.status === 'training') ? spanMin(e.time_in, e.time_out) / 60 : 0
-  return e && e.status === 'worked' && plan ? el + plan.perMin / 60 : el
+  return el + (e && plan ? plan.minFor(e) / 60 : 0)
 }
 
 export const rateOn = (rates = [], date) => {
@@ -131,8 +137,8 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
     const rows = dates.map((date) => {
       const e = map[date]
       const elapsed = regHours(e)
-      const lp = e && e.status === 'worked' ? planFor(date) : null
-      const lunchMin = lp ? lp.perMin : 0
+      const lp = e ? planFor(date) : null
+      const lunchMin = lp ? lp.minFor(e) : 0
       const hours = elapsed + lunchMin / 60
       const rate = e?.rate_override ?? rateOn(rates[w.id], date)
       const ot = e && byEntry[e.id]
@@ -150,7 +156,7 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
     const sum = (k) => rows.reduce((s, r) => s + r[k], 0)
     const regularPay = r2(sum('pay')), otPay = r2(sum('otPay')), bonusTotal = r2(bs.reduce((s, b) => s + b.amount, 0))
     report[w.id] = {
-      rows, bonuses: bs, shifts: rows.filter((r) => r.hours > 0).length,
+      rows, bonuses: bs, shifts: rows.filter((r) => r.elapsed > 0).length,
       regularHours: sum('hours'), lunchHours: sum('lunchMin') / 60, otHours: sum('ot_hours'), regularPay, otPay, bonusTotal,
       restDays: rows.filter((r) => r.status === 'rd').length,
       trainingHours: rows.filter((r) => r.status === 'training').reduce((s, r) => s + r.hours, 0),

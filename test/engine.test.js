@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import ExcelJS from 'exceljs'
 import { createEngine, EMPTY } from '../web/src/engine.js'
 import { buildWorkbook } from '../shared/export.js'
+import { parseHours, parseDateInput } from '../shared/input.js'
+import { parseNotes } from '../shared/parse.js'
 
 let saves = 0
 const e = createEngine(EMPTY(), () => saves++)
@@ -93,7 +95,7 @@ test('Excel export: structure and formulas', async () => {
   assert.equal(ws.getCell('H2').value, null)
   const lunchRow = ws.getRows(2, 31).find((r) => r.getCell('H').value)
   assert.equal(lunchRow.getCell('H').value, 30)
-  assert.match(lunchRow.getCell('D').value.formula, /MOD\(C\d+-B\d+,1\)\*24\+H\d+\/60/)
+  assert.match(lunchRow.getCell('D').value.formula, /MOD\(C\d+-B\d+,1\)\*24\)\+H\d+\/60/)
 })
 
 test('backup and restore round trip; bad files are rejected', async () => {
@@ -197,4 +199,69 @@ test('paid lunch: data from the earlier "deduct lunch" version is switched to th
   const s = await x.handle('GET', '/settings')
   assert.deepEqual([s.lunch_rule, s.lunch_threshold, s.lunch_from], [2, 8, '2025-03-01'])        // threshold now means WORKED hours; start date kept
   assert.equal((await x.handle('GET', '/summary/2025-03')).totals.regularHours, 10)               // lunch is added, not deducted
+})
+
+test('quick entry: typed hours and typed dates', () => {
+  assert.deepEqual(['4', '4.5', '4:30', '4h30', '4h 30m', '45m', 'abc'].map(parseHours), [4, 4.5, 4.5, 4.5, 4.5, 0.75, null])
+  const ref = '2026-11-02'
+  assert.deepEqual(['11/7', 'nov 7', '7 nov', '7', '2026-11-09', 'Nov 3, 2026', '13/40', 'x'].map((t) => parseDateInput(t, ref)),
+    ['2026-11-07', '2026-11-07', '2026-11-07', '2026-11-07', '2026-11-09', '2026-11-03', null, null])
+})
+
+test('lunch break gap: no warning when the gap is the lunch hour; a bigger hole is flagged', async () => {
+  const { call } = fresh()
+  const id = await addTeam(call, ['Jem', 'Marco'])
+  const day = (a, b) => call('PUT', '/day/2025-03-20', { entries: [
+    { worker_id: id.Jem, status: 'worked', time_in: '16:00', time_out: '20:00' }, { worker_id: id.Marco, status: 'worked', time_in: a, time_out: b }] })
+  assert.deepEqual((await day('21:00', '01:00')).warnings, [])                                  // 8-9pm is the lunch hour
+  const r = await day('21:30', '01:30')                                                          // 90 min hole: 60 is lunch, 30 is not
+  assert.deepEqual(r.warnings, [{ type: 'gap', minutes: 30 }])
+})
+
+test('give the lunch to one person: lunch-only entry, equal share of what is left', async () => {
+  const { call } = fresh()
+  const id = await addTeam(call, ['Brian', 'Elaine', 'Jem'])
+  const entries = (jem) => [
+    { worker_id: id.Brian, status: 'worked', time_in: '16:00', time_out: '20:00' },
+    { worker_id: id.Elaine, status: 'worked', time_in: '21:00', time_out: '01:00' }, jem]
+  const mins = async () => Object.fromEntries((await call('GET', '/day/2025-03-21')).workers.map((w) => [w.name, Math.round(w.row.hours * 60)]))
+  // Jem did not work but is given 40 of the 60 lunch minutes; the other 20 are shared by Brian and Elaine
+  await call('PUT', '/day/2025-03-21', { entries: entries({ worker_id: id.Jem, status: 'not_worked', lunch_min: 40 }) })
+  assert.deepEqual(await mins(), { Brian: 250, Elaine: 250, Jem: 40 })
+  // the whole lunch goes to Jem
+  await call('PUT', '/day/2025-03-21', { entries: entries({ worker_id: id.Jem, status: 'not_worked', lunch_min: 60 }) })
+  assert.deepEqual(await mins(), { Brian: 240, Elaine: 240, Jem: 60 })
+  // Jem works 1 hour and gets exactly that: lunch_min 0 stops the automatic share
+  await call('PUT', '/day/2025-03-22', { entries: [{ worker_id: id.Jem, status: 'worked', time_in: '16:00', time_out: '17:00', lunch_min: 0 },
+    { worker_id: id.Brian, status: 'worked', time_in: '17:00', time_out: '20:00' }, { worker_id: id.Elaine, status: 'worked', time_in: '21:00', time_out: '01:00' }] })
+  const d22 = Object.fromEntries((await call('GET', '/day/2025-03-22')).workers.map((w) => [w.name, Math.round(w.row.hours * 60)]))
+  assert.deepEqual(d22, { Jem: 60, Brian: 210, Elaine: 270 })                                      // 60 lunch minutes shared by Brian and Elaine (30 each)
+})
+
+test('rest-day OT: counts toward the pooled minimum, paid $8 only when it is reached; per-day availability', async () => {
+  const { call } = fresh()
+  const id = await addTeam(call, ['Jem', 'Brian', 'Marco'])
+  const offer = await call('POST', '/offers', { name: 'RDOT week', start_date: '2025-06-03', end_date: '2025-06-09', cap_hours: 4, min_hours: 8, qualified_rate: 8 })
+  await call('PUT', `/offers/${offer.id}/day-cap`, { date: '2025-06-05', hours: 2 })
+  const rdot = (d, list) => call('PUT', `/day/${d}`, { entries: list.map(([w, a, b]) => ({ worker_id: id[w], status: 'rdot', time_in: a, time_out: b })) })
+  await rdot('2025-06-03', [['Jem', '00:15', '01:15'], ['Brian', '01:15', '04:15']])
+  const pay = async () => Object.fromEntries((await call('GET', '/summary/2025-06')).rows.map((r) => [r.worker.name, [r.otHours, r.otPay, r.regularPay]]))
+  assert.deepEqual(await pay(), { Jem: [1, 5, 0], Brian: [3, 15, 0], Marco: [0, 0, 0] })         // 4 h so far: below the 8 h minimum -> regular $5
+  await rdot('2025-06-04', [['Jem', '23:00', '00:00'], ['Marco', '00:00', '03:00']])
+  assert.deepEqual(await pay(), { Jem: [2, 16, 0], Brian: [3, 24, 0], Marco: [3, 24, 0] })       // 8 h reached: every OT hour is $8
+  assert.equal((await call('GET', '/day/2025-06-03')).workers[0].row.lunchMin, 0)                  // RDOT gets no lunch and no regular hours
+  // per-day availability
+  assert.equal((await call('GET', '/day/2025-06-05')).offer.cap_today, 2)
+  await assert.rejects(rdot('2025-06-05', [['Jem', '22:00', '01:00']]), /capped at 2/)
+  await assert.rejects(rdot('2025-07-01', [['Jem', '22:00', '23:00']]), /needs an OT offer/)
+  await call('PUT', `/offers/${offer.id}/day-cap`, { date: '2025-06-05', hours: '' })
+  assert.equal((await call('GET', '/day/2025-06-05')).offer.cap_today, 4)
+})
+
+test('notes parser: rest-day OT and lunch lines', () => {
+  const w = [{ id: 1, name: 'Jem' }, { id: 2, name: 'Brian' }]
+  const r = parseNotes('jem nov 3 rdot 12:15am-1:15am\nbrian nov 7 4pm-8pm lunch 10m\njem nov 7 lunch 40min', w, 2026)
+  assert.deepEqual([r[0].ok, r[0].status, r[0].time_in, r[0].time_out], [true, 'rdot', '00:15', '01:15'])
+  assert.deepEqual([r[1].ok, r[1].status, r[1].time_in, r[1].time_out, r[1].lunch_min], [true, 'worked', '16:00', '20:00', 10])
+  assert.deepEqual([r[2].ok, r[2].status, r[2].lunch_min], [true, 'not_worked', 40])
 })

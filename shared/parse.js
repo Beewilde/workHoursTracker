@@ -28,8 +28,13 @@ export function parseNotes(text, workers, year) {
     const iso = date ? `${year}-${String(date[0]).padStart(2, '0')}-${String(date[1]).padStart(2, '0')}` : null
     const [main, ...otParts] = line.split(/\bot\b/i)
     const mainNoDate = main.replace(dm?.[0] || sm?.[0] || '', ' ')
-    const status = /\brd\b/i.test(main) ? 'rd' : /training/i.test(main) ? 'training' : 'worked'
-    const r = status === 'rd' ? null : range(mainNoDate)
+    const rdotLine = /\brd\s*ot\b/i.test(main)
+    const lm = /lunch\s*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minutes)\b/i.exec(main) || /(\d+(?:\.\d+)?)\s*(?:m|min|mins|minutes)\s*lunch/i.exec(main)
+    const lunch_min = lm ? +lm[1] : null
+    const mainClean = mainNoDate.replace(/lunch\s*\d+(?:\.\d+)?\s*(?:m|min|mins|minutes)\b/i, ' ').replace(/\d+(?:\.\d+)?\s*(?:m|min|mins|minutes)\s*lunch/i, ' ')
+    let status = rdotLine ? 'rdot' : /\brd\b/i.test(main) ? 'rd' : /training/i.test(main) ? 'training' : 'worked'
+    const r = status === 'rd' ? null : range(mainClean)
+    if (status === 'worked' && !r && lunch_min != null) status = 'not_worked'   // lunch only: paid lunch, no shift
     let ot = 0
     if (otParts.length) {
       const o = otParts.join(' ')
@@ -37,10 +42,10 @@ export function parseNotes(text, workers, year) {
       const rr = range(o)
       ot = h ? +h[1] : rr ? rr.hours : 0
     }
-    const ok = !!(w && iso && (status === 'rd' || r))
+    const ok = !!(w && iso && (status === 'rd' || status === 'not_worked' || r))
     return {
       line, ok, worker_id: w?.id ?? null, worker: w?.name ?? null, date: iso, status,
-      time_in: r?.time_in ?? null, time_out: r?.time_out ?? null, ot_hours: ot,
+      time_in: r?.time_in ?? null, time_out: r?.time_out ?? null, ot_hours: ot, lunch_min,
       error: ok ? null : !w ? 'No worker name found' : !iso ? 'No date found' : 'No time range found',
     }
   })

@@ -61,7 +61,7 @@ export function CalendarPage({ month, setMonth, today, openDay }) {
             <button className="day-worker" key={w.id} onClick={() => openDay(selDate)}>
               <Avatar w={w} small />
               <div><strong>{w.name}</strong><span>{s === 'rd' ? 'Rest day' : s === 'not_worked' ? 'Not worked' : s === 'not_logged' ? 'Not logged' : `${T(r.time_in)} – ${T(r.time_out)}`}</span></div>
-              <StatusLabel s={s}>{s === 'rd' ? 'RD' : s === 'not_worked' ? 'Off' : s === 'not_logged' ? 'Missing' : hm(r.hours)}</StatusLabel>
+              <StatusLabel s={s}>{s === 'rd' ? (r.hours > 0 ? hm(r.hours) + ' lunch' : 'RD') : s === 'not_worked' ? (r.hours > 0 ? hm(r.hours) + ' lunch' : 'Off') : s === 'not_logged' ? 'Missing' : s === 'rdot' ? 'RD OT' : hm(r.hours)}</StatusLabel>
               <Icon name="chevron" size={17} />
             </button>
           )
@@ -161,6 +161,7 @@ export function OffersPage() {
               <div><span>Below minimum</span><strong>{o.below_min_rate != null ? $(o.below_min_rate) + ' / hour' : 'Regular rate'}</strong></div>
               <div><span>Rate applies to</span><strong>{o.tier_mode === 'whole' ? 'All OT hours' : 'Hours past minimum'}</strong></div>
             </div>
+            {Object.keys(o.day_caps || {}).length > 0 && <p className="muted-text" style={{ marginTop: 12 }}>OT available per day: {Object.entries(o.day_caps).sort().map(([d, h]) => `${fmtDate(d, { month: 'short', day: 'numeric' })} ${h}h`).join(' · ')} (other days: {o.cap_hours}h)</p>}
             <div className="contributions">
               <p className="field-label">Worker contributions</p>
               {o.contributions.length === 0 && <p className="muted-text" style={{ paddingTop: 8 }}>No OT logged yet.</p>}

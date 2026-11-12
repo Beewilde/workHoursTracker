@@ -9,7 +9,7 @@ const BOX = { top: thin, left: thin, bottom: thin, right: thin }
 const CUR = '"$"#,##0.00'
 const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } })
 const L = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26) } return s }
-const NOTE = { worked: 'Regular', training: 'Training', rd: 'RD', not_worked: 'Regular', not_logged: 'Regular' }
+const NOTE = { worked: 'Regular', training: 'Training', rd: 'RD', rdot: 'RDOT', not_worked: 'Regular', not_logged: 'Regular' }
 export const monthTitle = (month) => `${MONTH_NAMES[+month.slice(5) - 1]} ${month.slice(0, 4)}`
 export const exportName = (month) => `${MONTH_NAMES[+month.slice(5) - 1]} Invoice.xlsx`
 const sheetName = (w, m) => `${w.name} - ${MON[m - 1]}`.replace(/[[\]:*?/\\]/g, '').slice(0, 31)
@@ -56,16 +56,16 @@ export async function buildWorkbook(ctx, opts = {}) {
 
     r.rows.forEach((row, i) => {
       const x = i + 2
-      const timed = row.status === 'worked' || row.status === 'training'
+      const timed = row.status === 'worked' || row.status === 'training' || row.status === 'rdot'
       cell(ws, 'A' + x, new Date(row.date + 'T00:00:00Z'), { fmt: o.weekday ? 'ddd mmm-dd-yyyy' : 'mmm-dd-yyyy', box: true })
       cell(ws, 'B' + x, timed ? toMin(row.time_in) / 1440 : null, { fmt: 'h:mm AM/PM', box: true })
       cell(ws, 'C' + x, timed ? toMin(row.time_out) / 1440 : null, { fmt: 'h:mm AM/PM', box: true })
-      cell(ws, 'D' + x, { formula: `IF(OR(G${x}="RD",B${x}="",C${x}=""),0,MOD(C${x}-B${x},1)*24+H${x}/60)`, result: row.hours }, { fmt: '0.00', box: true })
+      cell(ws, 'D' + x, { formula: `IF(G${x}="RDOT",0,IF(OR(G${x}="RD",B${x}="",C${x}=""),0,MOD(C${x}-B${x},1)*24)+H${x}/60)`, result: row.hours }, { fmt: '0.00', box: true })
       cell(ws, 'E' + x, row.rate, { fmt: CUR, box: true })
       cell(ws, 'F' + x, { formula: `ROUND(D${x}*E${x},2)`, result: row.pay }, { fmt: CUR, box: true })
       cell(ws, 'G' + x, NOTE[row.status], { box: true })
       cell(ws, 'H' + x, row.lunchMin > 0 ? row.lunchMin : null, { box: true })
-      ws.getCell('G' + x).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Regular,RD,Training"'], showErrorMessage: true, errorTitle: 'Notes', error: 'Choose Regular, RD or Training' }
+      ws.getCell('G' + x).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Regular,RD,Training,RDOT"'], showErrorMessage: true, errorTitle: 'Notes', error: 'Choose Regular, RD, Training or RDOT' }
       const offer = offers.find((f) => f.start_date <= row.date && row.date <= f.end_date)
       const fill = offer ? COL.yellow : undefined
       cell(ws, 'I' + x, row.ot_hours || null, { fmt: '0.00', box: true, fill })
@@ -81,6 +81,7 @@ export async function buildWorkbook(ctx, opts = {}) {
     ws.addConditionalFormatting({ ref: `B2:C${n + 1}`, rules: [
       { type: 'expression', priority: 1, formulae: ['$G2="RD"'], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: COL.grey } } } },
       { type: 'expression', priority: 2, formulae: ['$G2="Training"'], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: COL.green } } } },
+      { type: 'expression', priority: 3, formulae: ['$G2="RDOT"'], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFD9CCF0' } } } },
     ] })
 
     // totals row (same position as the original workbook)
@@ -95,7 +96,7 @@ export async function buildWorkbook(ctx, opts = {}) {
 
     // summary block
     const block = [
-      ['Days worked', `COUNTIF(D2:D${n + 1},">0")`, r.shifts, '0'],
+      ['Days worked', `COUNTIFS(D2:D${n + 1},">0",B2:B${n + 1},"<>")`, r.shifts, '0'],   // a lunch-only day has no time in, so it is not a worked day
       ['Total hours', `SUM(D2:D${n + 1})`, r.regularHours, '0.00'],
       ['Rest days', `COUNTIF(G2:G${n + 1},"RD")`, r.restDays, '0'],
       ['Training hours', `SUMIF(G2:G${n + 1},"Training",D2:D${n + 1})`, r.trainingHours, '0.00'],

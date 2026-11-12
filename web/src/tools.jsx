@@ -72,7 +72,7 @@ export function FilesPage({ month, setMonth, workers, tab, setTab }) {
               {rows.map((r, i) => (
                 <article className="list-card" key={i} style={{ marginBottom: 8 }}>
                   <span className={'menu-icon ' + (r.ok ? 'success' : 'warning')}><Icon name={r.ok ? 'check' : 'alert'} /></span>
-                  <div><h3>{r.ok ? `${r.worker} · ${fmtDate(r.date, { month: 'short', day: 'numeric' })}` : r.error}</h3><p>{r.ok ? (r.status === 'rd' ? 'Rest day' : `${T(r.time_in)} – ${T(r.time_out)}${r.ot_hours ? ` · OT ${h2(r.ot_hours)}h` : ''}`) : r.line}</p></div>
+                  <div><h3>{r.ok ? `${r.worker} · ${fmtDate(r.date, { month: 'short', day: 'numeric' })}` : r.error}</h3><p>{r.ok ? (r.status === 'rd' ? 'Rest day' : r.status === 'not_worked' ? `Paid lunch only: ${r.lunch_min} min` : `${T(r.time_in)} – ${T(r.time_out)}${r.status === 'rdot' ? ' · rest-day OT' : ''}${r.ot_hours && r.status !== 'rdot' ? ` · OT ${h2(r.ot_hours)}h` : ''}${r.lunch_min ? ` · lunch ${r.lunch_min} min` : ''}`) : r.line}</p></div>
                 </article>
               ))}
               <button className="primary-button full-button" disabled={!rows.some((r) => r.ok)} onClick={() => api('/apply-notes', { method: 'POST', body: { items: rows } }).then((r) => { toast(`${r.saved} entries saved`); setRows(null); setText('') }).catch((e) => toast(e.message, 'error'))}>Save {rows.filter((r) => r.ok).length} entries</button>
@@ -157,6 +157,7 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
       </section>
       <section className="settings-group">
         <h2>General</h2>
+        <div className="block"><Field label="Usual shift start (where typed hours begin)"><input type="time" defaultValue={s.shift_start || '16:00'} onBlur={(e) => e.target.value && e.target.value !== s.shift_start && put({ shift_start: e.target.value }, 'Shift start saved')} /></Field></div>
         <div className="block"><Field label="Timezone (decides what “today” is)"><input defaultValue={s.timezone} onBlur={(e) => e.target.value !== s.timezone && put({ timezone: e.target.value }, 'Timezone saved')} /></Field></div>
         <label className="toggle-row"><span><strong>Dark mode</strong><small>Easier on the eyes at night</small></span><input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} /><i /></label>
       </section>

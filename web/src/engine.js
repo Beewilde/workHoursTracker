@@ -4,9 +4,9 @@ import { monthReport, coverage, deriveOT, evalOffers, rateOn, toMin, spanMin, we
 import { parseNotes } from '../../shared/parse.js'
 
 const COLORS = ['#4169A1', '#7C6EAB', '#D08B5B', '#4E8E77', '#B5546B', '#5A9BB5']
-const STATUSES = ['worked', 'rd', 'not_worked', 'training']
+const STATUSES = ['worked', 'rd', 'not_worked', 'training', 'rdot']
 const ISO = /^\d{4}-\d{2}-\d{2}$/, MONTH = /^\d{4}-\d{2}$/
-const ENTRY_COLS = ['status', 'time_in', 'time_out', 'ot_hours', 'ot_start', 'ot_end', 'ot_position', 'ot_offer_id', 'rate_override', 'rate_override_reason', 'remark']
+const ENTRY_COLS = ['status', 'lunch_min', 'time_in', 'time_out', 'ot_hours', 'ot_start', 'ot_end', 'ot_position', 'ot_offer_id', 'rate_override', 'rate_override_reason', 'remark']
 export const APP_ID = 'work-hours-tracker'
 
 const defaultTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Manila' } catch { return 'Asia/Manila' } }
@@ -14,7 +14,7 @@ export const EMPTY = () => ({
   v: 1, seq: 1, workers: [], rates: [], entries: [], offers: [], bonuses: [], accountDays: {}, schedules: {}, paid: {}, lastBackupAt: null,
   settings: {
     timezone: defaultTz(), default_review_bonus: 10, rd_default: [2, 3, 4], reminder_days: 30,
-    lunch_rule: 2, lunch_auto: true, lunch_minutes: 60, lunch_threshold: 8, lunch_from: null,
+    lunch_rule: 2, lunch_auto: true, lunch_minutes: 60, lunch_threshold: 8, lunch_from: null, shift_start: '16:00',
     presets: [{ label: 'Evening', time_in: '20:30', time_out: '01:00' }, { label: 'Early', time_in: '16:00', time_out: '20:30' }],
   },
 })
@@ -48,6 +48,7 @@ export function createEngine(state, save = () => {}) {
   }
   ensureLunch()
   const active = () => S.workers.filter((w) => w.active)
+  const capFor = (o, date) => (o.day_caps && o.day_caps[date] != null ? o.day_caps[date] : o.cap_hours)
 
   function schedule(month) {
     if (S.schedules[month]) return { weekdays: S.schedules[month], confirmed: true }
@@ -70,8 +71,8 @@ export function createEngine(state, save = () => {}) {
       })),
       account: S.accountDays[date] || { date, company_hours: null, lunch_hours: null, note: null },
       coverage: cov,
-      offer: offer && { ...offer, stats: stats[offer.id], usedHours: entries.reduce((s, e) => s + (e.ot_hours || 0), 0) },
-      presets: S.settings.presets, lunchSettings: lunchCfg(),
+      offer: offer && { ...offer, stats: stats[offer.id], usedHours: entries.reduce((s, e) => s + (e.ot_hours || 0), 0), cap_today: capFor(offer, date) },
+      presets: S.settings.presets, lunchSettings: lunchCfg(), shiftStart: S.settings.shift_start || S.settings.presets[0]?.time_in || '16:00',
     }
   }
 
@@ -85,17 +86,23 @@ export function createEngine(state, save = () => {}) {
       need(w, 'Unknown worker'); need(!seen.has(w.id), 'Duplicate worker in this day'); seen.add(w.id)
       need(STATUSES.includes(e.status), 'Bad status')
       e.worker_id = w.id
-      const timed = e.status === 'worked' || e.status === 'training'
-      if (timed) need(toMin(e.time_in) != null && toMin(e.time_out) != null && spanMin(e.time_in, e.time_out) > 0, `${w.name}: enter a valid time in and time out`)
+      const timed = e.status === 'worked' || e.status === 'training', rdot = e.status === 'rdot'
+      if (timed || rdot) need(toMin(e.time_in) != null && toMin(e.time_out) != null && spanMin(e.time_in, e.time_out) > 0, `${w.name}: enter a valid time in and time out`)
       else { e.time_in = null; e.time_out = null }
+      e.lunch_min = num(e.lunch_min, `${w.name}: lunch minutes`, { nullable: true, max: 600 })
       e.ot_hours = num(e.ot_hours || 0, `${w.name}: OT hours`, { max: 24 })
       e.rate_override = num(e.rate_override, `${w.name}: rate override`, { nullable: true })
       if (e.rate_override != null) need(String(e.rate_override_reason || '').trim(), `${w.name}: a reason is required for a rate override`)
       else e.rate_override_reason = null
-      if (e.ot_hours > 0) need(timed, `${w.name}: OT needs a worked shift`)
+      if (rdot) {
+        // rest-day OT: the whole block is OT, it belongs to the OT offer of that date and has no regular hours
+        const off = offerFor(date)
+        need(off, `${w.name}: rest-day OT needs an OT offer covering this date`)
+        e.ot_hours = spanMin(e.time_in, e.time_out) / 60; e.ot_start = e.time_in; e.ot_end = e.time_out; e.ot_position = 'custom'; e.ot_offer_id = off.id
+      } else if (e.ot_hours > 0) need(timed, `${w.name}: OT needs a worked shift`)
       if (locked.has(w.id)) {
         const cur = existing.find((x) => x.worker_id === w.id)
-        const same = cur && cur.status === e.status && (cur.time_in || null) === (e.time_in || null) && (cur.time_out || null) === (e.time_out || null) && (cur.ot_hours || 0) === e.ot_hours
+        const same = cur && cur.status === e.status && (cur.time_in || null) === (e.time_in || null) && (cur.time_out || null) === (e.time_out || null) && (cur.ot_hours || 0) === e.ot_hours && (cur.lunch_min ?? null) === (e.lunch_min ?? null)
         if (!same) throw err(409, `${w.name}'s ${month} is marked paid and locked. Unmark it as paid to edit.`)
         e.__skip = true
       }
@@ -108,23 +115,27 @@ export function createEngine(state, save = () => {}) {
       if (!body.force) throw err(409, `Two workers overlap by ${cov.overlap} minutes.`, { needsConfirm: true })
       warnings.push({ type: 'overlap', minutes: cov.overlap })
     }
-    if (cov.status === 'gap') warnings.push({ type: 'gap', minutes: cov.gap })
+    // the day's lunch pool: a gap of up to that length is the lunch break itself, not a hole in the coverage
+    const acctOverride = body.account ? body.account.lunch_hours : S.accountDays[date]?.lunch_hours
+    const lp = lunchPlan(covInput, { ...lunchCfg(), override: acctOverride, date })
+    const unexplainedGap = Math.max(0, cov.gap - lp.poolMin)
+    if (cov.status === 'gap' && unexplainedGap > 0.5) warnings.push({ type: 'gap', minutes: Math.round(unexplainedGap) })
 
     const otIn = covInput.filter((e) => e.ot_hours > 0)
     let offer = null
     if (otIn.length) {
       offer = offerFor(date)
       if (!offer) throw err(400, 'No OT offer covers this date, so OT cannot be entered')
-      const total = otIn.reduce((s, e) => s + e.ot_hours, 0)
-      if (total > offer.cap_hours + 1e-9) throw err(400, `OT is capped at ${offer.cap_hours} h per shift for "${offer.name}" (you entered ${total} h across all workers)`)
+      const total = otIn.reduce((s, e) => s + e.ot_hours, 0), cap = capFor(offer, date)
+      if (total > cap + 1e-9) throw err(400, `OT is capped at ${cap} h for ${date} in "${offer.name}" (you entered ${total} h across all workers)`)
     }
     const position = body.ot_position === 'before' ? 'before' : 'after'
-    const ots = deriveOT(cov, position, otIn.map((e) => e.ot_hours))
-    otIn.forEach((e, i) => Object.assign(e, ots[i], { ot_position: position, ot_offer_id: offer.id }))
+    const regOt = otIn.filter((e) => e.status !== 'rdot')
+    const ots = deriveOT(cov, position, regOt.map((e) => e.ot_hours))
+    regOt.forEach((e, i) => Object.assign(e, ots[i], { ot_position: position, ot_offer_id: offer.id }))
     const a = body.account
     if (a && a.company_hours != null && a.company_hours !== '' && cov.hours) {
       // the company shows the whole shift including the paid lunch
-      const lp = lunchPlan(covInput, { ...lunchCfg(), override: a.lunch_hours, date })
       const total = cov.hours + lp.totalMin / 60
       if (Math.abs(total - Number(a.company_hours)) > 0.01) warnings.push({ type: 'mismatch', siblings: total, company: Number(a.company_hours) })
     }
@@ -193,6 +204,7 @@ export function createEngine(state, save = () => {}) {
     if (b.lunch_minutes != null) S.settings.lunch_minutes = num(b.lunch_minutes, 'Lunch minutes', { max: 240 })
     if (b.lunch_threshold != null) S.settings.lunch_threshold = num(b.lunch_threshold, 'Full shift hours', { min: 1, max: 24 })
     if ('lunch_from' in b) { need(!b.lunch_from || ISO.test(b.lunch_from), 'Bad date'); S.settings.lunch_from = b.lunch_from || null }
+    if (b.shift_start) { need(toMin(b.shift_start) != null, 'Bad time'); S.settings.shift_start = b.shift_start }
     if (b.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: b.timezone }) } catch { throw err(400, 'Unknown timezone') } S.settings.timezone = b.timezone }
     return commit(S.settings)
   })
@@ -263,13 +275,21 @@ export function createEngine(state, save = () => {}) {
   })
 
   on('GET', '/offers', () => offersView())
-  on('POST', '/offers', ({ body }) => { const { o, warnings } = offerBody(body); const row = { id: S.seq++, ...o }; S.offers.push(row); return commit({ id: row.id, warnings }) })
+  on('POST', '/offers', ({ body }) => { const { o, warnings } = offerBody(body); const row = { id: S.seq++, ...o, day_caps: {} }; S.offers.push(row); return commit({ id: row.id, warnings }) })
   on('PUT', '/offers/:id', ({ params: [id], body }) => {
     const i = S.offers.findIndex((o) => o.id === +id)
     need(i >= 0, 'Not found')
     const { o, warnings } = offerBody(body, +id)
-    S.offers[i] = { id: +id, ...o }
+    S.offers[i] = { id: +id, ...o, day_caps: S.offers[i].day_caps || {} }
     return commit({ id: +id, warnings })
+  })
+  on('PUT', '/offers/:id/day-cap', ({ params: [id], body }) => {
+    const o = S.offers.find((x) => x.id === +id)
+    need(o, 'Not found'); need(ISO.test(body.date || '') && body.date >= o.start_date && body.date <= o.end_date, 'That date is outside the offer')
+    o.day_caps ||= {}
+    if (body.hours === '' || body.hours == null) delete o.day_caps[body.date]
+    else o.day_caps[body.date] = num(body.hours, 'Hours available', { min: 0.25, max: 24 })
+    return commit({ ok: true })
   })
   on('DELETE', '/offers/:id', ({ params: [id] }) => {
     if (S.entries.some((e) => e.ot_offer_id === +id && e.ot_hours > 0)) throw err(409, 'This offer already has OT entries and cannot be deleted')
@@ -310,7 +330,7 @@ export function createEngine(state, save = () => {}) {
     let saved = 0
     for (const [date, list] of Object.entries(byDate)) {
       const cur = entriesOn(date).filter((e) => !list.some((i) => i.worker_id === e.worker_id))
-      const entries = [...cur.map((e) => ({ ...e })), ...list.map((i) => ({ worker_id: i.worker_id, status: i.status, time_in: i.time_in, time_out: i.time_out, ot_hours: i.ot_hours || 0 }))]
+      const entries = [...cur.map((e) => ({ ...e })), ...list.map((i) => ({ worker_id: i.worker_id, status: i.status, time_in: i.time_in, time_out: i.time_out, ot_hours: i.ot_hours || 0, lunch_min: i.lunch_min ?? null }))]
       saveDay(date, { entries, force: true })
       saved += list.length
     }
