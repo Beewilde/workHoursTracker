@@ -8,6 +8,9 @@ import { parseNotes } from '../shared/parse.js'
 
 let saves = 0
 const e = createEngine(EMPTY(), () => saves++)
+// these tests were written for the older lunch rule (lunch added on top of the logged times), which
+// still applies to records from before the switch; test/lunch-inside.test.js covers the current rule
+e.state.settings.lunch_inside = false
 const call = (m, u, b) => e.handle(m, u, b)
 const ids = {}
 
@@ -22,7 +25,7 @@ test('workers, rates, presets', async () => {
 })
 
 test('rest-day schedule is per month and copies forward as a suggestion', async () => {
-  assert.deepEqual((await call('GET', '/schedule/2026-10')).weekdays, [2, 3, 4])      // default suggestion
+  assert.deepEqual((await call('GET', '/schedule/2026-10')).weekdays, [3, 4])         // default suggestion: Wed, Thu
   await call('PUT', '/schedule/2026-10', { weekdays: [1, 2, 3] })
   const nov = await call('GET', '/schedule/2026-11')
   assert.deepEqual(nov.weekdays, [1, 2, 3]); assert.equal(nov.confirmed, false)
@@ -49,7 +52,10 @@ test('split shift, overlap, OT cap and pooled OT', async () => {
   await assert.rejects(call('PUT', '/day/2026-10-21', { entries: [
     { worker_id: ids.Alex, status: 'worked', time_in: '16:00', time_out: '01:00', ot_hours: 3 },
     { worker_id: ids.Sam, status: 'worked', time_in: '01:00', time_out: '02:00', ot_hours: 3 }] }), /capped at 5/)
-  await assert.rejects(call('PUT', '/day/2026-10-28', { entries: [{ worker_id: ids.Alex, status: 'worked', time_in: '16:00', time_out: '01:00', ot_hours: 1 }] }), /No OT offer/)
+  // OT on a day with no offer is allowed: it counts toward the month's OT minimum
+  const noOffer = await call('PUT', '/day/2026-10-28', { entries: [{ worker_id: ids.Alex, status: 'worked', time_in: '16:00', time_out: '01:00', ot_hours: 1 }] })
+  assert.equal(noOffer.day.workers.find((w) => w.name === 'Alex').entry.ot_offer_id, null)
+  await call('PUT', '/day/2026-10-28', { entries: [] })
   await assert.rejects(call('PUT', '/day/2026-10-28', { entries: [{ worker_id: ids.Alex, status: 'worked', time_in: '16:00', time_out: '01:00', rate_override: 6 }] }), /reason is required/)
 
   await call('PUT', '/day/2026-10-21', { entries: [
@@ -111,7 +117,7 @@ test('backup and restore round trip; bad files are rejected', async () => {
   const m = e.meta(); assert.equal(m.hasData, true); assert.ok(m.lastBackupAt)
 })
 
-const fresh = () => { const x = createEngine(EMPTY()); return { x, call: (m, u, b) => x.handle(m, u, b) } }
+const fresh = () => { const x = createEngine(EMPTY()); x.state.settings.lunch_inside = false; return { x, call: (m, u, b) => x.handle(m, u, b) } }
 const addTeam = async (call, names) => { const ids = {}; for (const n of names) ids[n] = (await call('POST', '/workers', { name: n, rate: 5 })).id; return ids }
 
 test('paid lunch: an 8 h day shared by 3 workers adds 20 min each, paid at the same rate', async () => {
@@ -197,7 +203,8 @@ test('paid lunch: existing records keep their numbers until you choose to apply 
 test('paid lunch: data from the earlier "deduct lunch" version is switched to the paid-lunch rule', async () => {
   const x = createEngine(oldState({ lunch_auto: true, lunch_minutes: 60, lunch_threshold: 9, lunch_from: '2025-03-01' }))
   const s = await x.handle('GET', '/settings')
-  assert.deepEqual([s.lunch_rule, s.lunch_threshold, s.lunch_from], [2, 8, '2025-03-01'])        // threshold now means WORKED hours; start date kept
+  assert.deepEqual([s.lunch_rule, s.lunch_threshold, s.lunch_from], [3, 8, '2025-03-01'])        // threshold now means WORKED hours; start date kept
+  assert.ok(s.lunch_inside && s.lunch_inside_from)                                                // lunch-inside rule only from today: old days keep their numbers
   assert.equal((await x.handle('GET', '/summary/2025-03')).totals.regularHours, 10)               // lunch is added, not deducted
 })
 
@@ -253,7 +260,7 @@ test('rest-day OT: counts toward the pooled minimum, paid $8 only when it is rea
   // per-day availability
   assert.equal((await call('GET', '/day/2025-06-05')).offer.cap_today, 2)
   await assert.rejects(rdot('2025-06-05', [['Jem', '22:00', '01:00']]), /capped at 2/)
-  await assert.rejects(rdot('2025-07-01', [['Jem', '22:00', '23:00']]), /needs an OT offer/)
+  await rdot('2025-07-01', [['Jem', '22:00', '23:00']])                                          // no offer: counts toward July's own OT minimum
   await call('PUT', `/offers/${offer.id}/day-cap`, { date: '2025-06-05', hours: '' })
   assert.equal((await call('GET', '/day/2025-06-05')).offer.cap_today, 4)
 })

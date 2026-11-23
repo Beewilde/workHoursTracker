@@ -32,7 +32,8 @@ export async function buildWorkbook(ctx, opts = {}) {
   const m = +month.slice(5)
   const dates = daysInMonth(month)
   const n = dates.length, t = n + 2, s0 = n + 4
-  const { report } = monthReport({ month, workers, rates: ctx.rates, entries: ctx.entries, offers, bonuses: ctx.bonuses, today, lunch: ctx.lunch, accountDays: ctx.accountDays })
+  const monthCfg = (m) => ctx.months?.[m] || {}
+  const { report, monthStats } = monthReport({ month, workers, rates: ctx.rates, entries: ctx.entries, offers, bonuses: ctx.bonuses, today, lunch: ctx.lunch, accountDays: ctx.accountDays, monthCfg })
   const names = Object.fromEntries(workers.map((w) => [w.id, sheetName(w, m)]))
   const q = (w) => `'${names[w.id]}'`
 
@@ -49,7 +50,7 @@ export async function buildWorkbook(ctx, opts = {}) {
     })
     const widths = [17, 11, 11, 12, 18, 13, 13, 12, 11, 18, 14, 32, 3, 13, 30, 20, 14]
     widths.forEach((x, i) => (ws.getColumn(i + 1).width = x))
-    ;[['A','Date'],['B','Time In'],['C','Time Out'],['D','Total Hours'],['E','Hourly Rate (USD)'],['F','Total Pay'],['G','Notes'],['H','Paid lunch (min)'],
+    ;[['A','Date'],['B','Time In'],['C','Time Out'],['D','Total Hours'],['E','Hourly Rate (USD)'],['F','Total Pay'],['G','Notes'],['H','Lunch +/− (min)'],
       ['I','OT Hours'],['J','Hourly Rate (USD)'],['K','Total Pay'],['L','Remarks'],['N','Review Date'],['O','Reference'],['P','Note'],['Q','Bonus (USD)']]
       .forEach(([c, txt]) => cell(ws, c + 1, txt, { bold: true, fill: COL.grey, box: true, wrap: true }))
     ws.getRow(1).height = 30
@@ -64,14 +65,15 @@ export async function buildWorkbook(ctx, opts = {}) {
       cell(ws, 'E' + x, row.rate, { fmt: CUR, box: true })
       cell(ws, 'F' + x, { formula: `ROUND(D${x}*E${x},2)`, result: row.pay }, { fmt: CUR, box: true })
       cell(ws, 'G' + x, NOTE[row.status], { box: true })
-      cell(ws, 'H' + x, row.lunchMin > 0 ? row.lunchMin : null, { box: true })
+      // what the lunch split changed for this person: + got lunch time, − covered lunch that went to others
+      cell(ws, 'H' + x, Math.abs(row.lunchMin) > 0.004 ? Math.round(row.lunchMin * 100) / 100 : null, { box: true, fmt: '0.##;-0.##' })
       ws.getCell('G' + x).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Regular,RD,Training,RDOT"'], showErrorMessage: true, errorTitle: 'Notes', error: 'Choose Regular, RD, Training or RDOT' }
       const offer = offers.find((f) => f.start_date <= row.date && row.date <= f.end_date)
-      const fill = offer ? COL.yellow : undefined
+      const fill = offer || row.ot_hours ? COL.yellow : undefined
       cell(ws, 'I' + x, row.ot_hours || null, { fmt: '0.00', box: true, fill })
       cell(ws, 'J' + x, row.ot_hours ? row.otRate : null, { fmt: CUR, box: true, fill })
       cell(ws, 'K' + x, { formula: `ROUND(I${x}*J${x},2)`, result: row.otPay }, { fmt: CUR, box: true, fill })
-      if (offer) ws.getCell('I' + x).dataValidation = { type: 'decimal', operator: 'between', formulae: [0, offer.cap_hours], allowBlank: true, showErrorMessage: true, error: `OT is capped at ${offer.cap_hours} h per shift` }
+      if (offer?.cap_hours) ws.getCell('I' + x).dataValidation = { type: 'decimal', operator: 'between', formulae: [0, offer.cap_hours], allowBlank: true, showErrorMessage: true, error: `OT is capped at ${offer.cap_hours} h per shift` }
       const bits = []
       if (row.ot_hours && row.ot_start) bits.push(`OT ${t12(row.ot_start)} to ${t12(row.ot_end)}${row.provisional ? ' (provisional)' : ''}`)
       if (row.override) bits.push(`Rate override: ${row.reason}`)
@@ -160,13 +162,25 @@ export async function buildWorkbook(ctx, opts = {}) {
 
   if (o.otSummary) {
     const inMonth = offers.filter((f) => f.start_date <= dates[n - 1] && f.end_date >= dates[0])
-    if (inMonth.length) {
+    const mst = monthStats?.[month]
+    if (inMonth.length || mst) {
       const ws = wb.addWorksheet('OT Summary', { views: [{ showGridLines: false }] })
-      const { stats, byEntry } = evalOffers(inMonth, ctx.entries, ctx.rates, today)
+      const { stats, byEntry } = evalOffers(offers, ctx.entries, ctx.rates, today, monthCfg)
       ;['Offer','Window','Max h / shift','Min total h','Qualified rate','Tier mode','Pooled hours','Status','Worker','OT hours','OT pay']
         .forEach((h, i) => { cell(ws, L(i + 1) + 1, h, { bold: true, fill: COL.grey, box: true, wrap: true }); ws.getColumn(i + 1).width = [22, 24, 13, 12, 14, 11, 13, 22, 16, 11, 13][i] })
       let x = 2
-      for (const f of inMonth) {
+      // the month's own OT pool (OT not under an offer that has its own minimum)
+      if (mst) {
+        const status = `${mst.final ? 'Final' : 'Provisional'}${mst.qualified ? ', minimum reached' : `, ${mst.remaining}h to minimum`}`
+        for (const w of workers) {
+          const es = ctx.entries.filter((e) => e.worker_id === w.id && e.date.startsWith(month) && e.ot_hours > 0 && byEntry[e.id]?.pool === 'm:' + month)
+          const vals = [`${monthTitle(month)} (monthly)`, `${dates[0]} to ${dates[n - 1]}`, null, mst.min, mst.rate, 'whole', mst.total, status, w.name, es.reduce((s, e) => s + e.ot_hours, 0), r2(es.reduce((s, e) => s + (byEntry[e.id]?.otPay || 0), 0))]
+          const fmts = [null, null, '0.00', '0.00', CUR, null, '0.00', null, null, '0.00', CUR]
+          vals.forEach((v, i) => cell(ws, L(i + 1) + x, v, { box: true, fmt: fmts[i] || undefined, align: i < 2 || i === 7 ? 'left' : 'center' }))
+          x++
+        }
+      }
+      for (const f of inMonth.filter((o) => o.min_hours != null)) {
         const st = stats[f.id]
         const status = `${st.final ? 'Final' : 'Provisional'}${st.qualified ? ', minimum reached' : `, ${st.remaining}h to minimum`}`
         for (const w of workers) {
@@ -188,7 +202,7 @@ export async function buildWorkbook(ctx, opts = {}) {
     const nW = workers.length, cF = 2 + nW
     cell(ws, 'A1', 'Date', { bold: true, fill: COL.grey, box: true })
     workers.forEach((w, j) => cell(ws, L(2 + j) + 1, `${w.name} paid hrs`, { bold: true, fill: COL.grey, box: true, wrap: true }))
-    ;['Paid Hrs (incl. lunch)','Of which lunch Hrs','Account OT Hrs','Company Recorded Hrs','Difference','Remarks'].forEach((h, k) => cell(ws, L(cF + k) + 1, h, { bold: true, fill: COL.grey, box: true, wrap: true }))
+    ;['Paid Hrs (incl. lunch)','Lunch Hrs (shared)','Account OT Hrs','Company Recorded Hrs','Difference','Remarks'].forEach((h, k) => cell(ws, L(cF + k) + 1, h, { bold: true, fill: COL.grey, box: true, wrap: true }))
     ws.getColumn(1).width = 17
     for (let c = 2; c <= cF + 5; c++) ws.getColumn(c).width = c === cF + 5 ? 28 : 14
     ws.getRow(1).height = 32
@@ -197,10 +211,10 @@ export async function buildWorkbook(ctx, opts = {}) {
       const x = i + 2, ad = ctx.accountDays?.[d]
       cell(ws, 'A' + x, new Date(d + 'T00:00:00Z'), { fmt: o.weekday ? 'ddd mmm-dd-yyyy' : 'mmm-dd-yyyy', box: true })
       let paid = 0, lunch = 0, ot = 0
-      workers.forEach((w, j) => { const row = report[w.id].rows[i]; paid += row.hours; lunch += row.lunchMin / 60; ot += row.ot_hours; cell(ws, L(2 + j) + x, { formula: `${q(w)}!D${x}`, result: row.hours }, { fmt: '0.00', box: true }) })
+      workers.forEach((w, j) => { const row = report[w.id].rows[i]; paid += row.hours; lunch += row.lunchShare / 60; ot += row.ot_hours; cell(ws, L(2 + j) + x, { formula: `${q(w)}!D${x}`, result: row.hours }, { fmt: '0.00', box: true }) })
       totPaid += paid; totLunch += lunch; totOt += ot
       cell(ws, L(cF) + x, { formula: `SUM(B${x}:${L(1 + nW)}${x})`, result: paid }, { fmt: '0.00', box: true, bold: true })
-      cell(ws, L(cF + 1) + x, { formula: `(${workers.map((w) => `N(${q(w)}!H${x})`).join('+')})/60`, result: lunch }, { fmt: '0.00', box: true })
+      cell(ws, L(cF + 1) + x, lunch > 0 ? r2(lunch) : null, { fmt: '0.00', box: true })
       cell(ws, L(cF + 2) + x, { formula: workers.map((w) => `${q(w)}!I${x}`).join('+'), result: ot }, { fmt: '0.00', box: true })
       const ch = ad?.company_hours ?? null
       cell(ws, L(cF + 3) + x, ch, { fmt: '0.00', box: true })

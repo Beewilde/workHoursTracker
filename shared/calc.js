@@ -16,6 +16,16 @@ export const spanMin = (tin, tout) => {
 }
 export const regHours = (e) =>
   e && (e.status === 'worked' || e.status === 'training') ? spanMin(e.time_in, e.time_out) / 60 : 0
+// ── Paid lunch ──
+// TWO ways a day can be written down (settings.lunch_inside picks one, from settings.lunch_inside_from):
+//
+// "inside" (current): the logged times already CONTAIN the lunch hour, e.g. 4pm–8:30pm + 8:30pm–1am
+//   for a 4pm–1am shift (9 paid hours = 8 work + 1 lunch). The day's total stays exactly the covered
+//   time; lunch only decides WHO gets that hour. It is taken out of everyone's time in proportion to
+//   how long they covered, then given back by the split the workers agreed on (equal by default,
+//   custom minutes per person, or all to one person such as the account owner).
+//
+// "added" (older records): the times are real work only and the lunch hour is ADDED on top:
 // Shared PAID lunch: a full shift is 8 worked hours plus 1 hour of lunch that is paid at the same rate.
 // By default the lunch hour is split EQUALLY between the workers who worked that day and ADDED to their time
 // (2 workers: +30 min each, 3 workers: +20 min each). Training and rest-day OT get no automatic lunch.
@@ -23,27 +33,40 @@ export const regHours = (e) =>
 // those minutes are taken out of the day's lunch pool and the rest is split between everyone left on automatic.
 //   cfg: { auto, minutes, threshold, from, override, date }; override = lunch hours for the day ('' = automatic)
 const hasMan = (e) => e.lunch_min !== null && e.lunch_min !== undefined && e.lunch_min !== '' && Number.isFinite(Number(e.lunch_min))
+//   cfg also takes { inside, insideFrom } for the "inside" way.
+export const lunchInside = (cfg = {}, date = null) => !!cfg.inside && !(cfg.insideFrom && date && date < cfg.insideFrom)
 export function lunchPlan(entries, cfg = {}) {
   const { auto = true, minutes = 60, threshold = 8, from = null, override = null, date = null } = cfg
+  const inside = lunchInside(cfg, date)
   const worked = entries.filter((e) => e.status === 'worked' && spanMin(e.time_in, e.time_out) > 0)
-  const elapsed = worked.reduce((s, e) => s + spanMin(e.time_in, e.time_out), 0) / 60
-  const blocked = !!(from && date && date < from)
+  const coveredMin = worked.reduce((s, e) => s + spanMin(e.time_in, e.time_out), 0)
+  const elapsed = coveredMin / 60
+  const blocked = !inside && !!(from && date && date < from)
   const manualOverride = override !== null && override !== undefined && override !== '' && Number.isFinite(Number(override))
   let pool = 0, source = 'none'
   if (blocked) source = 'before-start'
   else if (manualOverride) { pool = Number(override) * 60; source = 'manual' }
-  else if (auto && worked.length && elapsed >= threshold - 1e-9) { pool = minutes; source = 'auto' }
+  else if (inside ? auto && worked.length : auto && worked.length && elapsed >= threshold - 1e-9) { pool = minutes; source = 'auto' }
+  if (inside) pool = Math.min(pool, coveredMin)          // the lunch can't be longer than the time that was covered
   const givenTo = blocked ? [] : entries.filter(hasMan)
   const given = givenTo.reduce((s, e) => s + Number(e.lunch_min), 0)
   const autoWorkers = worked.filter((e) => !hasMan(e))
   const perMin = autoWorkers.length ? Math.max(0, pool - given) / autoWorkers.length : 0
+  // minutes of lunch credited to this person
   const minFor = (e) => (!e || blocked ? 0 : hasMan(e) ? Number(e.lunch_min) : e.status === 'worked' ? perMin : 0)
-  return { poolMin: pool, totalMin: given + perMin * autoWorkers.length, perMin, n: worked.length, autoN: autoWorkers.length, givenMin: given, givenN: givenTo.length, elapsed, source, minFor }
+  // "inside": minutes of lunch taken out of this person's covered time (in proportion to it)
+  const deductFor = (e) => (inside && e && e.status === 'worked' && coveredMin > 0 ? (pool * spanMin(e.time_in, e.time_out)) / coveredMin : 0)
+  // what lunch changes for this person, in minutes (negative = they covered the lunch and it went to others)
+  const adjFor = (e) => minFor(e) - deductFor(e)
+  return {
+    poolMin: pool, totalMin: given + perMin * autoWorkers.length, perMin, n: worked.length, autoN: autoWorkers.length,
+    givenMin: given, givenN: givenTo.length, elapsed, source, inside, overGiven: inside && given > pool + 1e-9, minFor, deductFor, adjFor,
+  }
 }
-// paid hours of one entry = worked time + its share of the paid lunch
+// paid hours of one entry = covered time + what the lunch split changes for it
 export const paidHours = (e, plan) => {
   const el = e && (e.status === 'worked' || e.status === 'training') ? spanMin(e.time_in, e.time_out) / 60 : 0
-  return el + (e && plan ? plan.minFor(e) / 60 : 0)
+  return el + (e && plan ? plan.adjFor(e) / 60 : 0)
 }
 
 export const rateOn = (rates = [], date) => {
@@ -99,34 +122,57 @@ export function deriveOT(cov, position, hoursList) {
   })
 }
 
-// Pooled OT: the minimum is measured on ALL workers' OT hours in the offer.
-export function evalOffers(offers, entries, ratesByWorker, today) {
-  const stats = {}, byEntry = {}
-  for (const o of offers) {
-    const list = entries
-      .filter((e) => e.ot_offer_id === o.id && e.ot_hours > 0)
-      .sort((a, b) => a.date.localeCompare(b.date) || (toMin(a.ot_start) ?? 0) - (toMin(b.ot_start) ?? 0) || a.id - b.id)
+// ── Pooled OT ──
+// The company sees ONE person (the account), so OT minimums count EVERYONE's OT hours together.
+// Each OT hour belongs to one pool:
+//   • an OT offer (announcement) that has its OWN minimum → that offer's pool, its minimum and rate
+//   • otherwise → the MONTH's pool, with the minimum and OT rate set for that month
+// Minimum reached → every hour in the pool is paid the OT rate. Below it → each worker's regular rate
+// (or the offer's below_min_rate). Pay stays provisional until the offer / month is over.
+//   monthCfg(month) → { ot_min, ot_rate }   (null/0 minimum = no minimum)
+const lastDay = (month) => daysInMonth(month).at(-1)
+export const hasOwnMin = (o) => o && o.min_hours !== null && o.min_hours !== undefined && o.min_hours !== ''
+export function evalOffers(offers, entries, ratesByWorker, today, monthCfg = () => ({})) {
+  const stats = {}, monthStats = {}, byEntry = {}, pools = new Map()
+  const byId = new Map(offers.map((o) => [o.id, o]))
+  for (const e of entries) {
+    if (!(e.ot_hours > 0)) continue
+    const o = byId.get(e.ot_offer_id)
+    const key = hasOwnMin(o) ? 'o:' + o.id : 'm:' + e.date.slice(0, 7)
+    if (!pools.has(key)) pools.set(key, [])
+    pools.get(key).push(e)
+  }
+  for (const o of offers) if (hasOwnMin(o) && !pools.has('o:' + o.id)) pools.set('o:' + o.id, [])
+  for (const [key, list] of pools) {
+    const isOffer = key.startsWith('o:'), id = key.slice(2)
+    const o = isOffer ? offers.find((x) => String(x.id) === id) : null
+    const cfg = isOffer ? null : monthCfg(id) || {}
+    const min = Number(isOffer ? o.min_hours : cfg.ot_min) || 0
+    const final = today > (isOffer ? o.end_date : lastDay(id))
+    list.sort((a, b) => a.date.localeCompare(b.date) || (toMin(a.ot_start) ?? 0) - (toMin(b.ot_start) ?? 0) || String(a.id).localeCompare(String(b.id)))
     const total = list.reduce((s, e) => s + e.ot_hours, 0)
-    const final = today > o.end_date
-    const qualified = total >= o.min_hours
+    const qualified = total >= min - 1e-9
     let cum = 0
     for (const e of list) {
-      const base = o.below_min_rate ?? rateOn(ratesByWorker[e.worker_id], e.date)
+      const eo = byId.get(e.ot_offer_id)                 // an offer without its own minimum can still set the rate
+      const otRate = Number(eo?.qualified_rate ?? cfg?.ot_rate ?? 0)
+      const base = (isOffer ? o.below_min_rate : eo?.below_min_rate) ?? rateOn(ratesByWorker[e.worker_id], e.date)
       let pay
-      if (o.tier_mode === 'marginal') {
-        const under = Math.max(0, Math.min(e.ot_hours, o.min_hours - cum))
-        pay = under * base + (e.ot_hours - under) * o.qualified_rate
-      } else pay = e.ot_hours * (qualified ? o.qualified_rate : base)
+      if (isOffer && o.tier_mode === 'marginal') {
+        const under = Math.max(0, Math.min(e.ot_hours, min - cum))
+        pay = under * base + (e.ot_hours - under) * otRate
+      } else pay = e.ot_hours * (qualified ? otRate : base)
       cum += e.ot_hours
-      byEntry[e.id] = { otPay: r2(pay), otRate: pay / e.ot_hours, provisional: !final }
+      byEntry[e.id] = { otPay: r2(pay), otRate: pay / e.ot_hours, provisional: !final, pool: key }
     }
-    stats[o.id] = { total, min: o.min_hours, qualified, final, remaining: Math.max(0, o.min_hours - total) }
+    const st = { total, min, qualified, final, remaining: Math.max(0, min - total) }
+    if (isOffer) stats[o.id] = st; else monthStats[id] = { ...st, rate: Number(cfg.ot_rate ?? 0) }
   }
-  return { stats, byEntry }
+  return { stats, monthStats, byEntry }
 }
 
-export function monthReport({ month, workers, rates, entries, offers, bonuses, today, lunch = null, accountDays = {} }) {
-  const { stats, byEntry } = evalOffers(offers, entries, rates, today)
+export function monthReport({ month, workers, rates, entries, offers, bonuses, today, lunch = null, accountDays = {}, monthCfg = () => ({}) }) {
+  const { stats, monthStats, byEntry } = evalOffers(offers, entries, rates, today, monthCfg)
   const dates = daysInMonth(month)
   const report = {}
   const byDate = new Map()
@@ -138,14 +184,15 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
       const e = map[date]
       const elapsed = regHours(e)
       const lp = e ? planFor(date) : null
-      const lunchMin = lp ? lp.minFor(e) : 0
+      const lunchMin = lp ? lp.adjFor(e) : 0                 // what the lunch split changed, in minutes (can be negative)
+      const lunchShare = lp ? lp.minFor(e) : 0
       const hours = elapsed + lunchMin / 60
       const rate = e?.rate_override ?? rateOn(rates[w.id], date)
       const ot = e && byEntry[e.id]
       return {
         date, entryId: e?.id ?? null, status: e ? e.status : 'not_logged',
         time_in: e?.time_in ?? null, time_out: e?.time_out ?? null,
-        hours, elapsed, lunchMin, rate, pay: r2(hours * rate),
+        hours, elapsed, lunchMin, lunchShare, rate, pay: r2(hours * rate),
         ot_hours: e?.ot_hours || 0, ot_start: e?.ot_start ?? null, ot_end: e?.ot_end ?? null,
         otRate: ot?.otRate ?? 0, otPay: ot?.otPay ?? 0, provisional: ot?.provisional ?? false,
         offerId: e?.ot_offer_id ?? null, override: e?.rate_override != null,
@@ -157,12 +204,12 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
     const regularPay = r2(sum('pay')), otPay = r2(sum('otPay')), bonusTotal = r2(bs.reduce((s, b) => s + b.amount, 0))
     report[w.id] = {
       rows, bonuses: bs, shifts: rows.filter((r) => r.elapsed > 0).length,
-      regularHours: sum('hours'), lunchHours: sum('lunchMin') / 60, otHours: sum('ot_hours'), regularPay, otPay, bonusTotal,
+      regularHours: sum('hours'), lunchHours: sum('lunchShare') / 60, otHours: sum('ot_hours'), regularPay, otPay, bonusTotal,
       restDays: rows.filter((r) => r.status === 'rd').length,
       trainingHours: rows.filter((r) => r.status === 'training').reduce((s, r) => s + r.hours, 0),
       notLogged: rows.filter((r) => r.status === 'not_logged').length,
       total: r2(regularPay + otPay + bonusTotal),
     }
   }
-  return { report, stats }
+  return { report, stats, monthStats }
 }
