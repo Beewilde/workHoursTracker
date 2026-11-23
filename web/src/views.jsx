@@ -31,12 +31,13 @@ export function CalendarPage({ month, setMonth, today, openDay }) {
         <div className="calendar-grid">
           {Array.from({ length: first }).map((_, i) => <button key={'b' + i} disabled />)}
           {days.map((d, i) => (
-            <button key={d} className={`${d === selDate ? 'selected' : ''} ${d === data.today ? 'today' : ''} ${data.weekdays.includes((first + i) % 7) ? 'rest' : ''}`} onClick={() => setSel(d)}>
+            <button key={d} className={`${d === selDate ? 'selected' : ''} ${d === data.today ? 'today' : ''} ${data.weekdays.includes((first + i) % 7) || data.leave?.includes(d) ? 'rest' : ''}`} onClick={() => setSel(d)}>
               <span>{i + 1}</span>
+              {data.leave?.includes(d) && <small className="muted-text" style={{ fontSize: 10 }}>leave</small>}
               <div className="day-dots">
                 {data.workers.filter((w) => filter === 'all' || w.id === filter).map((w) => {
                   const s = data.days[d][w.id]
-                  if (s === 'not_logged') return d <= data.today ? <i key={w.id} className="amber" /> : null
+                  if (s === 'not_logged') return null
                   if (s === 'rd' || s === 'not_worked') return <i key={w.id} className="grey" />
                   if (s === 'training') return <i key={w.id} className="green" />
                   return <i key={w.id} style={{ background: w.color }} />
@@ -47,7 +48,7 @@ export function CalendarPage({ month, setMonth, today, openDay }) {
         </div>
         <div className="calendar-legend">
           {data.workers.map((w) => <span key={w.id}><i style={{ background: w.color }} />{w.name} worked</span>)}
-          <span><i className="grey" />Rest / not worked</span><span><i className="green" />Training</span><span><i className="amber" />Not logged</span>
+          <span><i className="grey" />Rest / not worked</span><span><i className="green" />Training</span>
         </div>
       </section>
       <section className="surface selected-day">
@@ -91,7 +92,8 @@ export function SummaryPage({ month, setMonth }) {
         <Metric label="Regular hours" value={hm(t.regularHours) || '0h'} /><Metric label="OT hours" value={hm(t.otHours) || '0h'} />
         <Metric label="Regular pay" value={$(t.regularPay)} /><Metric label="OT pay" value={$(t.otPay)} /><Metric label="Review bonuses" value={$(t.bonusTotal)} />
       </div>
-      {data.notLogged > 0 && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>{data.notLogged} worker-days have no entry</strong><p>Complete them in the calendar for an accurate month.</p></div></div>}
+      {data.notLogged > 0 && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>{data.notLogged} workday{data.notLogged === 1 ? '' : 's'} with nothing logged</strong><p>{data.missingDays.slice(0, 8).map((d) => fmtDate(d, { month: 'short', day: 'numeric' })).join(', ')}{data.missingDays.length > 8 ? '…' : ''}. Log who worked, or mark the day as leave.</p></div></div>}
+      {(data.otMonth.total > 0 || data.otMonth.min > 0) && <OtPoolCard title={`${monthLabel(month)} OT (monthly minimum)`} st={data.otMonth} rate={data.otRate} />}
       <div className="section-heading"><div><h2>Worker payouts</h2><p>Review earnings and payment status.</p></div><button className="outline-button" onClick={() => setUnpaidOnly(!unpaidOnly)}>{unpaidOnly ? 'Show all' : 'Unpaid only'}</button></div>
       <div className="payout-table surface">
         <div className="table-head"><span>Worker</span><span>Shifts</span><span>Regular</span><span>Overtime</span><span>Bonuses</span><span>Total</span><span>Status</span></div>
@@ -106,12 +108,18 @@ export function SummaryPage({ month, setMonth }) {
           </div>
         ))}
       </div>
-      {data.offers.map((o) => (
-        <section className="surface" key={o.id}><div className="section-heading" style={{ margin: 0 }}><div><p className="eyebrow">OT offer</p><h2>{o.name}</h2></div><span className="provisional">{o.stats.final ? 'Final' : 'Provisional'}</span></div>
-          <div className="mini-progress"><div><span>Pooled progress</span><strong>{h2(o.stats.total)} of {o.min_hours}h</strong></div><div className="progress-track"><span style={{ width: Math.min(100, (o.stats.total / (o.min_hours || 1)) * 100) + '%' }} /></div>
-            <p>{o.stats.qualified ? `Minimum reached: ${$(o.qualified_rate)}/h on OT hours.` : 'Below the minimum: OT is paid at each worker’s regular rate.'}</p></div></section>
-      ))}
+      {data.offers.filter((o) => o.min_hours != null).map((o) => <OtPoolCard key={o.id} title={`OT offer · ${o.name}`} st={o.stats} rate={o.qualified_rate} />)}
     </Page>
+  )
+}
+
+// progress of one OT pool (a month, or an offer with its own minimum)
+export function OtPoolCard({ title, st, rate }) {
+  if (!st) return null
+  return (
+    <section className="surface"><div className="section-heading" style={{ margin: 0 }}><div><p className="eyebrow">Pooled OT</p><h2>{title}</h2></div><span className="provisional">{st.final ? 'Final' : 'Provisional'}</span></div>
+      <div className="mini-progress"><div><span>Everyone’s OT together</span><strong>{h2(st.total)}{st.min ? ` of ${st.min}h` : 'h'}</strong></div>{st.min > 0 && <div className="progress-track"><span style={{ width: Math.min(100, (st.total / st.min) * 100) + '%' }} /></div>}
+        <p>{!st.min ? `No minimum: OT is paid at ${$(rate)}/h.` : st.qualified ? `Minimum reached: every OT hour is paid ${$(rate)}/h.` : `${h2(st.remaining)}h more to reach the minimum. Until then OT is paid at the regular rate.`}</p></div></section>
   )
 }
 
@@ -139,25 +147,26 @@ export function OffersPage() {
         <button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>Past offers</button>
         <button className="primary-button small" onClick={() => setEdit(empty)}><Icon name="plus" size={16} /> Create offer</button>
       </div>
-      {list.length === 0 && <section className="surface"><p className="muted-text">{tab === 'active' ? 'No active OT offers. When the company announces one, create it here with its dates, cap, minimum hours and rates.' : 'No past offers yet.'}</p></section>}
+      {list.length === 0 && <section className="surface"><p className="muted-text">{tab === 'active' ? 'No active OT offers. OT can still be logged on any day; it counts toward the month’s minimum. Create an offer here when an announcement sets its own dates, minimum or rate.' : 'No past offers yet.'}</p></section>}
       {list.map((o) => {
-        const pct = Math.min(100, Math.round((o.stats.total / (o.min_hours || 1)) * 100))
+        const own = o.min_hours != null
+        const pct = own ? Math.min(100, Math.round((o.stats.total / (o.min_hours || 1)) * 100)) : 100
         return (
           <article className="offer-card" key={o.id}>
             <div className="offer-head"><div><span className={`active-pill ${o.active ? '' : 'final'}`}>{o.active ? 'Active offer' : 'Ended'}</span><h2>{o.name}</h2><p>{fmtDate(o.start_date, { month: 'long', day: 'numeric' })} – {fmtDate(o.end_date, { month: 'long', day: 'numeric', year: 'numeric' })}</p></div></div>
             <div className="offer-progress">
               <div className="ring" style={{ background: `radial-gradient(closest-side,var(--surface) 80%,transparent 81% 99%),conic-gradient(var(--blue) ${pct}%,var(--border) 0)` }}><strong>{pct}%</strong><span>{o.stats.qualified ? 'qualified' : 'of minimum'}</span></div>
-              <div className="offer-progress-copy"><p>Account pooled progress</p><h3>{h2(o.stats.total)} of {o.min_hours} hours</h3>
-                <div className="progress-track"><span style={{ width: pct + '%' }} /></div>
-                <span>{o.stats.qualified ? `Minimum reached: ${$(o.qualified_rate)}/hour applies` : `${h2(o.stats.remaining)} hours remaining for the ${$(o.qualified_rate)}/hour rate`}</span></div>
+              <div className="offer-progress-copy"><p>Account pooled progress</p><h3>{own ? `${h2(o.stats.total)} of ${o.min_hours} hours` : `${h2(o.stats.total)} hours`}</h3>
+                {own && <div className="progress-track"><span style={{ width: pct + '%' }} /></div>}
+                <span>{!own ? 'No minimum of its own: these hours count toward the month’s OT minimum' : o.stats.qualified ? `Minimum reached: ${$(o.qualified_rate)}/hour applies` : `${h2(o.stats.remaining)} hours remaining for the ${$(o.qualified_rate)}/hour rate`}</span></div>
             </div>
             <div className="offer-terms">
-              <div><span>Per-shift cap</span><strong>{o.cap_hours} hours</strong></div>
+              <div><span>Per-shift cap</span><strong>{o.cap_hours != null ? `${o.cap_hours} hours` : 'No limit'}</strong></div>
               <div><span>Qualified rate</span><strong>{$(o.qualified_rate)} / hour</strong></div>
               <div><span>Current status</span><strong className={o.stats.final ? '' : 'amber-text'}>{o.stats.final ? 'Final' : 'Provisional'}</strong></div>
             </div>
             <div className="offer-terms">
-              <div><span>Minimum total</span><strong>{o.min_hours} hours</strong></div>
+              <div><span>Minimum total</span><strong>{own ? `${o.min_hours} hours` : 'Month’s minimum'}</strong></div>
               <div><span>Below minimum</span><strong>{o.below_min_rate != null ? $(o.below_min_rate) + ' / hour' : 'Regular rate'}</strong></div>
               <div><span>Rate applies to</span><strong>{o.tier_mode === 'whole' ? 'All OT hours' : 'Hours past minimum'}</strong></div>
             </div>
@@ -175,13 +184,13 @@ export function OffersPage() {
           </article>
         )
       })}
-      <div className="info-card"><Icon name="alert" size={18} /><div><strong>How pooled OT works</strong><p>The company counts everyone on the account as one person. When the combined OT hours reach the offer’s minimum, the qualified rate applies; otherwise OT is paid at each worker’s regular rate. Each offer is counted on its own.</p></div></div>
+      <div className="info-card"><Icon name="alert" size={18} /><div><strong>How pooled OT works</strong><p>The company counts everyone on the account as one person. When everyone’s OT hours together reach the minimum, every OT hour gets the OT rate; otherwise OT is paid at each worker’s regular rate. An offer with its own minimum is counted on its own. OT outside such an offer (including OT the supervisor offers day by day) counts toward the month’s minimum, set in Settings.</p></div></div>
       {edit && (
         <Modal title={edit.id ? 'Edit OT offer' : 'New OT offer'} onClose={() => setEdit(null)}>
           <div className="form-stack">
             <Field label="Name"><input {...bind(edit, setEdit, 'name')} placeholder="e.g. Week 4 OT" /></Field>
             <div className="form-grid" style={{ marginTop: 0 }}><Field label="First shift date"><input type="date" {...bind(edit, setEdit, 'start_date')} /></Field><Field label="Last shift date"><input type="date" {...bind(edit, setEdit, 'end_date')} /></Field></div>
-            <div className="form-grid" style={{ marginTop: 0 }}><Field label="Max OT hours per shift"><input type="number" step="0.25" {...bind(edit, setEdit, 'cap_hours')} /></Field><Field label="Minimum total OT hours"><input type="number" step="0.25" {...bind(edit, setEdit, 'min_hours')} /></Field></div>
+            <div className="form-grid" style={{ marginTop: 0 }}><Field label="Max OT hours per shift (blank = no limit)"><input type="number" step="0.25" {...bind(edit, setEdit, 'cap_hours')} /></Field><Field label="Own minimum (blank = month’s minimum)"><input type="number" step="0.25" {...bind(edit, setEdit, 'min_hours')} /></Field></div>
             <div className="form-grid" style={{ marginTop: 0 }}><Field label="Qualified rate ($/h)"><input type="number" step="0.01" {...bind(edit, setEdit, 'qualified_rate')} /></Field><Field label="Below minimum ($/h, blank = regular)"><input type="number" step="0.01" {...bind(edit, setEdit, 'below_min_rate')} /></Field></div>
             <Field label="When the minimum is reached"><select {...bind(edit, setEdit, 'tier_mode')}><option value="whole">Pay the qualified rate on ALL OT hours in this offer</option><option value="marginal">Pay it only on hours past the minimum</option></select></Field>
             <Field label="Notes"><input {...bind(edit, setEdit, 'notes')} /></Field>
@@ -203,7 +212,7 @@ export function BonusesPage({ month, setMonth, workers }) {
   const header = { title: 'Review Bonuses', eyebrow: `${monthLabel(month)} · ${$(total)} total` }
   if (error) return <Page {...header}><ErrorBox error={error} /></Page>
   if (loading || !data) return <Page {...header}><Loading /></Page>
-  const open = (b) => { setWho(null); setEdit(b || { worker_id: workers[0]?.id ?? '', review_date: month + '-' + String(Math.min(new Date().getDate(), 28)).padStart(2, '0'), reference: '', note: '', chat_time: '', amount: settings?.default_review_bonus ?? 10 }) }
+  const open = (b) => { setWho(null); setEdit(b || { worker_id: (workers.find((w) => w.owner) || workers[0])?.id ?? '', review_date: month + '-' + String(Math.min(new Date().getDate(), 28)).padStart(2, '0'), reference: '', note: '', chat_time: '', amount: settings?.default_review_bonus ?? 10 }) }
   const save = () => api(edit.id ? `/bonuses/${edit.id}` : '/bonuses', { method: edit.id ? 'PUT' : 'POST', body: edit }).then(() => { toast('Bonus saved'); setEdit(null); reload() }).catch((e) => toast(e.message, 'error'))
   const del = () => window.confirm('Delete this bonus?') && api(`/bonuses/${edit.id}`, { method: 'DELETE' }).then(() => { setEdit(null); reload() }).catch((e) => toast(e.message, 'error'))
   const suggest = () => api(`/covered?date=${edit.review_date}&time=${edit.chat_time}`).then(setWho).catch((e) => toast(e.message, 'error'))
@@ -211,7 +220,7 @@ export function BonusesPage({ month, setMonth, workers }) {
     <Page {...header}>
       <MonthNav month={month} setMonth={setMonth} />
       <button className="primary-button top-action" onClick={() => open()}><Icon name="plus" size={17} /> Add bonus</button>
-      {data.length === 0 && <section className="surface" style={{ clear: 'both' }}><p className="muted-text">No review bonuses for {monthLabel(month)}. Trustpilot reviews name the company account; credit each one to whoever handled that customer.</p></section>}
+      {data.length === 0 && <section className="surface" style={{ clear: 'both' }}><p className="muted-text">No review bonuses for {monthLabel(month)}. Reviews name the account, so they go to the account owner by default. If the review came from a chat during someone’s hours, credit that person instead.</p></section>}
       {data.map((b) => (
         <article className="list-card" key={b.id}>
           <span className="menu-icon success"><Icon name="gift" /></span>
@@ -256,7 +265,7 @@ export function WorkersPage({ onChange }) {
       {data.length === 0 && <section className="surface" style={{ clear: 'both' }}><p className="muted-text">Add the people who share the company account and split its hours.</p></section>}
       {data.map((w) => (
         <article className={`worker-management ${w.active ? '' : 'inactive'}`} key={w.id}>
-          <div className="worker-identity"><Avatar w={w} /><div><h3>{w.name}</h3><p>{w.active ? <><span className="online-dot" /> Active</> : 'Inactive'}</p></div></div>
+          <div className="worker-identity"><Avatar w={w} /><div><h3>{w.name}</h3><p>{w.active ? <><span className="online-dot" /> Active</> : 'Inactive'}{w.owner ? ' · Account owner' : ''}</p></div></div>
           <div className="rate-box"><span>Hourly rate</span><strong>{$(w.rate)}</strong><small>{w.rates.length > 1 ? `${w.rates.length} rates on file` : 'No changes yet'}</small></div>
           <button className="outline-button" onClick={() => { setManage(w.id); setRate({ effective_from: '', rate: '' }) }}>Manage</button>
         </article>
@@ -278,6 +287,8 @@ export function WorkersPage({ onChange }) {
           <button className="primary-button full-button" onClick={() => api(`/workers/${cur.id}/rates`, { method: 'POST', body: rate }).then(() => { setRate({ effective_from: '', rate: '' }); after(); toast('Rate added') }).catch((e) => toast(e.message, 'error'))}>Add rate</button>
           <button className="outline-button full-button" style={{ marginTop: 10 }} onClick={() => api(`/workers/${cur.id}/active`, { method: 'POST', body: { active: !cur.active } }).then(() => { after(); setManage(null) })}>{cur.active ? 'Deactivate worker' : 'Reactivate worker'}</button>
           <p className="muted-text" style={{ marginTop: 10 }}>Deactivating hides the worker from the daily log. Their history and totals stay.</p>
+          <button className="outline-button full-button" style={{ marginTop: 10 }} onClick={() => api(`/workers/${cur.id}/owner`, { method: 'POST', body: { owner: !cur.owner } }).then(after)}>{cur.owner ? 'No longer the account owner' : 'Make account owner'}</button>
+          <p className="muted-text" style={{ marginTop: 10 }}>The account owner is whose job it is. Review bonuses go to them by default, and the daily log has a one-tap “lunch to {data.find((w) => w.owner)?.name || 'owner'}” for days they do the calls.</p>
         </Modal>
       )}
     </Page>

@@ -14,18 +14,18 @@ export const ENTRY_COLS = ['status', 'time_in', 'time_out', 'lunch_min', 'ot_hou
 // table -> how its rows are keyed, which columns sync, and where they live in the state.
 // Order = upload order (parents first; payouts last so a "paid" lock never blocks its own month).
 export const TABLES = {
-  workers:      { key: ['id'], cols: ['id', 'name', 'color', 'active'] },
+  workers:      { key: ['id'], cols: ['id', 'name', 'color', 'active', 'owner'] },
   worker_rates: { key: ['worker_id', 'effective_from'], cols: ['worker_id', 'effective_from', 'rate'] },
   ot_offers:    { key: ['id'], cols: ['id', 'name', 'start_date', 'end_date', 'cap_hours', 'min_hours', 'qualified_rate', 'below_min_rate', 'tier_mode', 'day_caps', 'notes'] },
   entries:      { key: ['worker_id', 'date'], cols: ['id', 'worker_id', 'date', ...ENTRY_COLS] },
   bonuses:      { key: ['id'], cols: ['id', 'worker_id', 'review_date', 'pay_month', 'reference', 'note', 'chat_time', 'amount'] },
-  account_days: { key: ['date'], cols: ['date', 'company_hours', 'lunch_hours', 'note'] },
-  schedules:    { key: ['month'], cols: ['month', 'weekdays'] },
+  account_days: { key: ['date'], cols: ['date', 'company_hours', 'lunch_hours', 'note', 'day_off'] },
+  schedules:    { key: ['month'], cols: ['month', 'weekdays', 'shift_start', 'shift_end', 'ot_min', 'ot_rate'] },   // month settings
   payouts:      { key: ['month', 'worker_id'], cols: ['worker_id', 'month', 'total', 'snapshot', 'paid_at'] },
 }
 const NAMES = Object.keys(TABLES)
-const TIME_COLS = new Set(['time_in', 'time_out', 'ot_start', 'ot_end', 'chat_time'])
-const NUM_COLS = new Set(['rate', 'cap_hours', 'min_hours', 'qualified_rate', 'below_min_rate', 'lunch_min', 'ot_hours', 'rate_override', 'amount', 'company_hours', 'lunch_hours', 'total'])
+const TIME_COLS = new Set(['time_in', 'time_out', 'ot_start', 'ot_end', 'chat_time', 'shift_start', 'shift_end'])
+const NUM_COLS = new Set(['rate', 'cap_hours', 'min_hours', 'qualified_rate', 'below_min_rate', 'lunch_min', 'ot_hours', 'rate_override', 'amount', 'company_hours', 'lunch_hours', 'total', 'ot_min', 'ot_rate'])
 const LOCAL_ONLY_SETTINGS = []          // every setting is shared by the family
 
 const keyOf = (t, r) => TABLES[t].key.map((k) => String(r[k])).join('|')
@@ -39,6 +39,7 @@ export function normalize(t, r) {
     if (v != null && TIME_COLS.has(c)) v = String(v).slice(0, 5)             // Postgres sends 16:00:00
     if (v != null && NUM_COLS.has(c)) v = Number(v)
     if (c === 'active') v = v !== false
+    if (c === 'owner') v = !!v
     if (c === 'day_caps' || c === 'snapshot') v = sortKeys(v || {})
     if (c === 'weekdays') v = [...(v || [])].map(Number).sort()
     if (c === 'paid_at' && v) v = new Date(v).toISOString()
@@ -58,7 +59,7 @@ export function localRows(S) {
   S.entries.forEach((r) => put('entries', r))
   S.bonuses.forEach((r) => put('bonuses', r))
   Object.values(S.accountDays || {}).forEach((r) => put('account_days', r))
-  Object.entries(S.schedules || {}).forEach(([month, weekdays]) => put('schedules', { month, weekdays }))
+  Object.entries(S.schedules || {}).forEach(([month, v]) => put('schedules', { month, ...(Array.isArray(v) ? { weekdays: v } : v) }))
   for (const [k, v] of Object.entries(S.paid || {})) {
     const [month, worker_id] = k.split('|'), snap = typeof v === 'string' ? { at: v } : v
     put('payouts', { month, worker_id, total: snap.total ?? 0, snapshot: snap, paid_at: snap.at })
@@ -77,7 +78,7 @@ function applyRow(S, t, key, row) {
     case 'entries': return upsert('entries', row)
     case 'bonuses': return upsert('bonuses', row)
     case 'account_days': if (row) S.accountDays[key] = row; else delete S.accountDays[key]; return
-    case 'schedules': if (row) S.schedules[key] = row.weekdays; else delete S.schedules[key]; return
+    case 'schedules': if (row) { const { month: _m, ...v } = row; S.schedules[key] = v } else delete S.schedules[key]; return
     case 'payouts': if (row) S.paid[key] = { ...row.snapshot, at: row.paid_at }; else delete S.paid[key]; return
   }
 }

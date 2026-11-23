@@ -135,3 +135,21 @@ test('normalize makes phone rows and Postgres rows compare equal', () => {
   assert.deepEqual(normalize('entries', phoneRow), normalize('entries', pgRow))
   assert.equal(localRows(EMPTY()).entries.size, 0)
 })
+
+test('month settings, the account owner and leave days sync too', async () => {
+  const srv = fakeServer(); srv.addHousehold(HH)
+  const A = phone(srv), B = phone(srv)
+  const ate = (await A.call('POST', '/workers', { name: 'Ate', rate: 5 })).id
+  await A.call('POST', `/workers/${ate}/owner`, { owner: true })
+  await A.call('PUT', '/schedule/2026-12', { shift_start: '17:00', shift_end: '02:00', ot_min: 18, ot_rate: 8 })
+  await A.call('PUT', '/day/2026-12-01', { account: { day_off: 'leave' }, entries: [] })
+  await A.run(); await B.run()
+  const s = await B.call('GET', '/schedule/2026-12')
+  assert.deepEqual([s.shift_start, s.shift_end, s.ot_min, s.confirmed], ['17:00', '02:00', 18, true])
+  assert.equal((await B.call('GET', '/workers'))[0].owner, true)
+  assert.equal((await B.call('GET', '/day/2026-12-01')).isLeave, true)
+  await A.run(); assert.equal((await A.run()).state, 'ok')
+  const before = srv.requests; await A.run(); await B.run()
+  assert.equal(srv.db.schedules.length, 1)
+  assert.ok(srv.requests - before < 40)                                                   // nothing re-uploaded
+})

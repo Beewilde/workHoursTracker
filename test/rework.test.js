@@ -46,9 +46,8 @@ test('a paid month shows when later setting changes would give a different total
   await call('PUT', '/day/2026-11-02', { entries: [
     { worker_id: a, status: 'worked', time_in: '16:00', time_out: '20:00' },
     { worker_id: b, status: 'worked', time_in: '20:00', time_out: '00:00' }] })
-  await call('PUT', '/settings', { lunch_auto: false })
   await call('PUT', `/paid/2026-11/${a}`, { paid: true })
-  await call('PUT', '/settings', { lunch_auto: true, lunch_from: null })
+  await call('PUT', '/settings', { lunch_inside: false, lunch_from: null })      // switch to the older "lunch added on top" rule
   const row = (await call('GET', '/summary/2026-11')).rows.find((r) => r.worker.id === a)
   assert.equal(row.paidTotal, 20); assert.equal(row.total, 22.5); assert.equal(row.changedSincePaid, true)
 })

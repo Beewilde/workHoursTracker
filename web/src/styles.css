@@ -276,3 +276,5 @@ i.blue{background:#4169a1}i.violet{background:#7c6eab}i.green{background:#65a77b
 .hours-range strong { font-size:13px; min-height:42px; display:flex; align-items:center; }
 .segment-gap.lunch { background:repeating-linear-gradient(45deg,var(--blue-light),var(--blue-light) 4px,var(--border) 4px,var(--border) 8px); display:flex; align-items:center; justify-content:center; }
 .segment-gap.lunch span { color:var(--muted); font-size:10px; font-weight:700; background:var(--surface); border-radius:99px; padding:2px 7px; }
+/* chosen option in a row of outline buttons (e.g. the day's lunch split) */
+.outline-button.active { background: var(--blue); border-color: var(--blue); color: #fff; }

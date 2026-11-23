@@ -54,6 +54,7 @@ create table public.workers (
   name         text not null check (length(trim(name)) between 1 and 40),
   color        text not null default '#4169A1' check (color ~ '^#[0-9A-Fa-f]{6}$'),
   active       boolean not null default true,
+  owner        boolean not null default false,                   -- the account owner (e.g. the sister whose job it is)
   user_id      uuid references auth.users(id) on delete set null,  -- optional: the worker's own login
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
@@ -76,8 +77,8 @@ create table public.ot_offers (
   name           text not null check (length(trim(name)) > 0),
   start_date     date not null,
   end_date       date not null,
-  cap_hours      numeric not null check (cap_hours between 0.25 and 24),
-  min_hours      numeric not null check (min_hours >= 0),
+  cap_hours      numeric check (cap_hours between 0.25 and 24),     -- null = no per-day limit
+  min_hours      numeric check (min_hours >= 0),                    -- null = hours count toward the MONTH's minimum
   qualified_rate numeric not null check (qualified_rate >= 0),
   below_min_rate numeric check (below_min_rate >= 0),
   tier_mode      text not null default 'whole' check (tier_mode in ('whole','marginal')),
@@ -115,8 +116,7 @@ create table public.entries (
   -- timed statuses need both times; rest/not-worked days must not carry times
   check ((status in ('worked','training','rdot')) = (time_in is not null and time_out is not null)),
   check (time_in is null or time_in <> time_out),
-  check (rate_override is null or length(trim(coalesce(rate_override_reason,''))) > 0),
-  check (ot_hours = 0 or ot_offer_id is not null)
+  check (rate_override is null or length(trim(coalesce(rate_override_reason,''))) > 0)
 );
 create index on public.entries (household_id, date);
 
@@ -126,14 +126,20 @@ create table public.account_days (
   company_hours numeric check (company_hours between 0 and 48),
   lunch_hours   numeric check (lunch_hours between 0 and 12),
   note          text,
+  day_off       text check (day_off in ('leave')),                 -- the account did not work (e.g. ate's leave)
   updated_at    timestamptz not null default now(),
   primary key (household_id, date)
 );
 
+-- month settings: rest days, shift time, and the month's OT minimum / rate (they change month to month)
 create table public.schedules (
   household_id uuid not null references public.households(id) on delete cascade,
   month        char(7) not null check (month ~ '^\d{4}-\d{2}$'),
   weekdays     smallint[] not null check (weekdays <@ array[0,1,2,3,4,5,6]::smallint[]),
+  shift_start  time,
+  shift_end    time,
+  ot_min       numeric check (ot_min >= 0),
+  ot_rate      numeric check (ot_rate >= 0),
   updated_at   timestamptz not null default now(),
   primary key (household_id, month)
 );

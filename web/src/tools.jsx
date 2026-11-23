@@ -102,21 +102,36 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
   const [presets, setPresets] = useState(null)
   const [bonus, setBonus] = useState(null)
   const [lunch, setLunch] = useState(null)
+  const [mon, setMon] = useState(null)
   if (!s || !sch || !meta) return <Page title="Settings" eyebrow="Preferences"><Loading /></Page>
   const P = presets || s.presets, B = bonus ?? s.default_review_bonus
   const LU = lunch || { auto: s.lunch_auto, minutes: s.lunch_minutes, threshold: s.lunch_threshold, from: s.lunch_from || '' }
   const put = (body, msg) => api('/settings', { method: 'PUT', body }).then(() => { toast(msg || 'Saved'); reloadS(); onChange() }).catch((e) => toast(e.message, 'error'))
-  const setDays = (weekdays) => api(`/schedule/${month}`, { method: 'PUT', body: { weekdays } }).then(reloadSch)
+  const setDays = (weekdays) => api(`/schedule/${month}`, { method: 'PUT', body: { weekdays } }).then(reloadSch).catch((e) => toast(e.message, 'error'))
+  const M = mon || { shift_start: sch.shift_start, shift_end: sch.shift_end, ot_min: sch.ot_min ?? '', ot_rate: sch.ot_rate ?? '' }
+  const saveMonth = () => api(`/schedule/${month}`, { method: 'PUT', body: { ...M, weekdays: sch.weekdays } }).then(() => { toast(`${monthLabel(month)} saved`); setMon(null); reloadSch() }).catch((e) => toast(e.message, 'error'))
   const modeText = { idb: 'Saved on this device.', local: 'Saved on this device (basic mode).', memory: 'This browser is not letting the app save anything (private mode?). Data will be lost when the tab closes.' }[storageInfo.mode]
   const upd = (i, k, v) => setPresets(P.map((x, j) => (j === i ? { ...x, [k]: v } : x)))
   return (
     <Page title="Settings" eyebrow="Preferences">
       <MonthNav month={month} setMonth={setMonth} />
       <section className="settings-group">
-        <h2>Rest days · {monthLabel(month)}</h2>
+        <h2>{monthLabel(month)}</h2>
+        <div className="block"><p className="field-label" style={{ marginBottom: 8 }}>Rest days</p></div>
         <div className="worker-filter">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((n, d) => <button key={d} className={sch.weekdays.includes(d) ? 'active' : ''} onClick={() => setDays(sch.weekdays.includes(d) ? sch.weekdays.filter((x) => x !== d) : [...sch.weekdays, d])}>{n}</button>)}</div>
         <div className="block"><p className="muted-text">{sch.confirmed ? 'Confirmed for this month.' : 'Suggested from last month. Confirm it to lock it in.'} Rest days are pre-marked on the daily log; entries you already logged are never overwritten.</p>
-          {!sch.confirmed && <button className="primary-button small" style={{ marginTop: 10 }} onClick={() => api(`/schedule/${month}`, { method: 'PUT', body: { weekdays: sch.weekdays } }).then(() => { toast('Schedule confirmed'); reloadSch() })}>Confirm for {monthLabel(month)}</button>}</div>
+          </div>
+        <div className="block">
+          <div className="form-grid" style={{ marginTop: 0 }}>
+            <Field label="Shift starts"><input type="time" value={M.shift_start} onChange={(e) => setMon({ ...M, shift_start: e.target.value })} /></Field>
+            <Field label="Shift ends (lunch included)"><input type="time" value={M.shift_end} onChange={(e) => setMon({ ...M, shift_end: e.target.value })} /></Field>
+          </div>
+          <div className="form-grid">
+            <Field label="OT minimum this month (hours, blank = none)"><input type="number" min="0" step="0.5" value={M.ot_min} onChange={(e) => setMon({ ...M, ot_min: e.target.value })} /></Field>
+            <Field label="OT rate ($/h)"><input type="number" min="0" step="0.01" value={M.ot_rate} onChange={(e) => setMon({ ...M, ot_rate: e.target.value })} /></Field>
+          </div>
+          <p className="muted-text" style={{ marginTop: 10 }}>The OT minimum counts everyone’s OT this month together (except OT under an offer that has its own minimum). Reached → every OT hour gets the OT rate; not reached → the regular rate. {sch.confirmed ? 'Saved for this month.' : 'Copied from the last month you set. Save to keep it for this month.'} The next month copies this one until you change it.</p>
+          <button className="primary-button small" style={{ marginTop: 10 }} onClick={saveMonth}>{sch.confirmed ? 'Save' : 'Confirm'} {monthLabel(month)}</button></div>
       </section>
       <section className="settings-group">
         <h2>Shift presets</h2>
@@ -135,17 +150,18 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
       </section>
       <section className="settings-group">
         <h2>Paid lunch</h2>
-        <label className="toggle-row"><span><strong>Add paid lunch automatically</strong><small>A full shift has a paid lunch that is shared equally by the workers of that day and added to their time</small></span><input type="checkbox" checked={LU.auto} onChange={(e) => setLunch({ ...LU, auto: e.target.checked })} /><i /></label>
+        <label className="toggle-row"><span><strong>Share the paid lunch automatically</strong><small>{s.lunch_inside ? 'The shift times include the lunch. It is shared equally by that day’s workers unless you set it on the day (custom, or all to the account owner).' : 'A full shift has a paid lunch that is shared equally by the workers of that day and added to their time'}</small></span><input type="checkbox" checked={LU.auto} onChange={(e) => setLunch({ ...LU, auto: e.target.checked })} /><i /></label>
         <div className="block">
           <div className="form-grid three" style={{ marginTop: 0 }}>
             <Field label="Lunch (minutes)"><input type="number" min="0" step="5" value={LU.minutes} onChange={(e) => setLunch({ ...LU, minutes: e.target.value })} /></Field>
-            <Field label="Full shift (worked hours)"><input type="number" min="1" step="0.5" value={LU.threshold} onChange={(e) => setLunch({ ...LU, threshold: e.target.value })} /></Field>
-            <Field label="Applies from"><input type="date" value={LU.from} onChange={(e) => setLunch({ ...LU, from: e.target.value })} /></Field>
+            {!s.lunch_inside && <><Field label="Full shift (worked hours)"><input type="number" min="1" step="0.5" value={LU.threshold} onChange={(e) => setLunch({ ...LU, threshold: e.target.value })} /></Field>
+            <Field label="Applies from"><input type="date" value={LU.from} onChange={(e) => setLunch({ ...LU, from: e.target.value })} /></Field></>}
           </div>
-          <p className="muted-text" style={{ marginTop: 10 }}>Example: {LU.threshold} worked hours plus {LU.minutes} minutes of paid lunch is {Math.round((Number(LU.threshold) * 60 + Number(LU.minutes)) / 6) / 10} paid hours. With 2 workers that day each gets +{Math.round(LU.minutes / 2 * 10) / 10} minutes, with 3 workers +{Math.round(LU.minutes / 3 * 10) / 10} minutes, paid at their own hourly rate. Days shorter than a full shift get no lunch, and Training hours get none. You can override one day on Account Day. Days before “Applies from” keep their old numbers.</p>
+          {s.lunch_inside && <p className="muted-text" style={{ marginTop: 10 }}>Example: a 4pm–1am shift is 9 paid hours with the lunch inside it. Two workers who cover 4:00–8:30 and 8:30–1:00 get 4h 30m each; whoever covers longer gives up a bigger part of the lunch hour and gets the same share back.{s.lunch_inside_from ? ` Days before ${s.lunch_inside_from} keep the older rule (lunch added on top of the times).` : ''}</p>}
+          {!s.lunch_inside && <p className="muted-text" style={{ marginTop: 10 }}>Example: {LU.threshold} worked hours plus {LU.minutes} minutes of paid lunch is {Math.round((Number(LU.threshold) * 60 + Number(LU.minutes)) / 6) / 10} paid hours. With 2 workers that day each gets +{Math.round(LU.minutes / 2 * 10) / 10} minutes, with 3 workers +{Math.round(LU.minutes / 3 * 10) / 10} minutes, paid at their own hourly rate. Days shorter than a full shift get no lunch, and Training hours get none. You can override one day on Account Day. Days before “Applies from” keep their old numbers.</p>}
           <div className="pill-row">
             <button className="primary-button small" onClick={() => put({ lunch_auto: LU.auto, lunch_minutes: LU.minutes, lunch_threshold: LU.threshold, lunch_from: LU.from || null }, 'Lunch rule saved').then(() => setLunch(null))}>Save lunch rule</button>
-            <button className="outline-button" onClick={() => { if (window.confirm('This recalculates EVERY saved day, including months already marked paid, so past totals will change. Download a backup first. Continue?')) put({ lunch_from: null }, 'Paid lunch now applies to all past days').then(() => setLunch(null)) }}>Apply to all past days</button>
+            {!s.lunch_inside && <button className="outline-button" onClick={() => { if (window.confirm('This recalculates EVERY saved day, including months already marked paid, so past totals will change. Download a backup first. Continue?')) put({ lunch_from: null }, 'Paid lunch now applies to all past days').then(() => setLunch(null)) }}>Apply to all past days</button>}
           </div>
         </div>
       </section>

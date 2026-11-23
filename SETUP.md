@@ -76,6 +76,19 @@ npm run ios            # opens Xcode
 ### App icon and name
 `capacitor.config.json` sets the app id (`com.beewilde.shiftly`) and name. **Change the id before your first Play/App Store upload**, because it can never change after that. To make icons from `web/public/icon-512.png`: `npx @capacitor/assets generate`.
 
+## How pay is worked out
+
+- **Shift:** set per month in Settings (default 4pm–1am = 9 paid hours, lunch included). New months copy the last one.
+- **Logging a day:** enter who covered which part of the shift, as times or with **Enter hours only** (times are filled in from the shift start, in order). The parts should add up to the shift. If they don't, the app warns you.
+- **Lunch hour:** it's inside the shift, so a day never pays more than the shift. By default it's **shared equally** by that day's workers. Each person gives up their part of the hour in proportion to how long they covered and gets an equal share back, so 4:00–8:30 + 8:30–1:00 pays 4h 30m each. On any day you can switch it to **All to <owner>** (ate, when she does the calls) or **Custom** minutes per person.
+- **Account owner:** set under Workers & Rates. Review bonuses go to the owner by default, and the owner gets the one-tap lunch option. The owner can also log shift hours like anyone else.
+- **OT:** log it on any day, as after-shift hours or as **RD OT** on a rest day. Everyone's OT is added up:
+  - OT on days covered by an **OT offer that has its own minimum** counts toward that offer.
+  - All other OT counts toward the **month's minimum** (Settings → this month).
+  - Minimum reached → **every** OT hour in that group is paid the OT rate. Below it → the regular rate. OT stays "provisional" until the offer or month is over.
+- **Leave:** "Mark as leave (no work)" on the day. Nobody is paid, and it doesn't count as a missing day.
+- **Older records** (before this version) keep the old rule, where the lunch was added on top of the times, so their totals don't change.
+
 ## How sync behaves (so nothing surprises you)
 
 - Every phone saves first, then uploads a few seconds later. Other phones pick changes up every minute, when the app is opened, or when they get signal back.
