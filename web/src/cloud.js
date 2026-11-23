@@ -54,12 +54,18 @@ export async function startCloud() {
   else emit({ state: session ? 'no-family' : 'signed-out', email: session?.user?.email })
 }
 
-// ── sign-in with a 6-digit code sent by email (no password, no links to open) ──
-export async function sendCode(email) { must(await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: true } })) }
-export async function verifyCode(email, code) {
-  const d = must(await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: 'email' }))
+// ── sign-in with email + password (Supabase sends no emails: "Confirm email" is off) ──
+const friendly = (m) => /invalid login credentials/i.test(m) ? 'Wrong email or password.'
+  : /already registered|already exists/i.test(m) ? 'That email already has an account. Use “Sign in” instead.'
+  : /password should be at least/i.test(m) ? 'Use a password of at least 6 characters.' : m
+const auth = async (p) => { const { data, error } = await p; if (error) throw new Error(friendly(error.message)); return data }
+async function signedIn(d) {
+  if (!d.session) throw new Error('The account was created but needs email confirmation. Turn off "Confirm email" in Supabase (Authentication → Sign In / Providers → Email).')
   emit({ state: 'no-family', email: d.user?.email })
 }
+export async function signIn(email, password) { await signedIn(await auth(supabase.auth.signInWithPassword({ email: email.trim(), password }))) }
+export async function createAccount(email, password) { await signedIn(await auth(supabase.auth.signUp({ email: email.trim(), password }))) }
+export async function changePassword(password) { await auth(supabase.auth.updateUser({ password })) }
 export async function signOut() { stopSync(); saveMeta({}); await supabase.auth.signOut(); emit({ state: 'signed-out', household_id: null }) }
 
 // ── families ──

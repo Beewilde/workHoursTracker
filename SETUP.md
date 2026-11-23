@@ -26,13 +26,8 @@ npx cap add ios        # Mac only
 
 1. Sign up at supabase.com and click **New project**. Pick the region closest to you (Singapore for the Philippines).
 2. **SQL Editor → New query**: run the files in `supabase/migrations/` in order: `0001_init.sql`, then `0002_harden.sql`, then `0003_policies.sql`. (Already done for the `shiftly` project.)
-3. **Authentication → Sign In / Providers → Email**: keep it on. Turn **Confirm email** off, since the 6-digit code already confirms it.
-4. **Authentication → Email Templates → Magic Link**: the app signs in with a **code**, so make sure the email includes it. Replace the body with something like:
-   ```html
-   <h2>Your Shiftly sign-in code</h2>
-   <p><strong>{{ .Token }}</strong></p>
-   ```
-   Note: Supabase's built-in email sender only sends a few emails per hour. That's plenty for a family. If you ever hit the limit, add your own SMTP under Authentication → SMTP Settings.
+3. **Authentication → Sign In / Providers → Email**: keep it on and turn **Confirm email** off. The app signs in with **email + password**, so Supabase never needs to send an email (the free plan only lets you edit email templates after you connect your own email sender).
+4. **Forgotten password:** in **Authentication → Users**, delete that user. They create the account again with a new password and join with the family's invite code. No records are lost, because records belong to the family, not to the login. Signed-in users can change their password under Family sync → Your account.
 5. **Project Settings → API**: copy the **Project URL** and the **anon public** key.
 
 Then create `.env` in this folder (copy `.env.example`):
@@ -52,8 +47,8 @@ The free plan has no automatic database backups. Every phone already holds a ful
 
 ## 3. First run
 
-1. Build and install on **your** phone (step 4). Open **More → Family sync**, sign in with your email, then **Create family**. If this phone already has records from the old web version (use Restore backup first), they're uploaded.
-2. On each other phone: install the app, go to **More → Family sync**, sign in with **their own** email, and enter the **invite code** shown on your phone. Their phone downloads the family's records.
+1. Build and install on **your** phone (step 4). Open **More → Family sync**, create an account (email + password), then **Create family**. If this phone already has records from the old web version (use Restore backup first), they're uploaded.
+2. On each other phone: install the app, go to **More → Family sync**, create an account with **their own** email and password, and enter the **invite code** shown on your phone. Their phone downloads the family's records.
 
 ## 4. Build and install
 

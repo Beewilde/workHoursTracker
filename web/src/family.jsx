@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react'
 import { useToast, downloadBackup } from './lib.js'
 import { Page, Icon, Field, Loading } from './ui.jsx'
-import { cloudConfigured, onSyncStatus, sendCode, verifyCode, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, syncNow } from './cloud.js'
+import { cloudConfigured, onSyncStatus, signIn, createAccount, changePassword, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, syncNow } from './cloud.js'
 import { getEngine } from './storage.js'
 
 export const useSyncStatus = () => {
@@ -26,22 +26,37 @@ const Section = ({ title, children }) => <section className="settings-group"><h2
 
 function SignIn() {
   const toast = useToast()
-  const [email, setEmail] = useState(''), [code, setCode] = useState(''), [sent, setSent] = useState(false), [busy, setBusy] = useState(false)
-  const go = (f) => async () => { setBusy(true); try { await f() } catch (e) { toast(e.message, 'error') } finally { setBusy(false) } }
+  const [mode, setMode] = useState('signin'), [email, setEmail] = useState(''), [pw, setPw] = useState(''), [pw2, setPw2] = useState(''), [busy, setBusy] = useState(false)
+  const creating = mode === 'create'
+  const ok = /\S+@\S+\.\S+/.test(email) && pw.length >= 6 && (!creating || pw === pw2)
+  const submit = async () => { setBusy(true); try { await (creating ? createAccount(email, pw) : signIn(email, pw)) } catch (e) { toast(e.message, 'error') } finally { setBusy(false) } }
   return (
-    <Section title="Sign in">
-      <p className="muted-text">Sign in to share the records with your family. Everyone sees the same workers, days and payouts, and each phone keeps working without signal.</p>
+    <Section title={creating ? 'Create your account' : 'Sign in'}>
+      <p className="muted-text">Sign in to share the records with your family. Everyone sees the same workers, days and payouts, and each phone keeps working without signal. Each person uses their own email and password.</p>
       <div className="form-grid" style={{ marginTop: 12 }}>
-        <Field label="Email"><input type="email" autoComplete="email" value={email} disabled={sent} onChange={(e) => setEmail(e.target.value)} /></Field>
-        {sent && <Field label="6-digit code from the email"><input inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} /></Field>}
+        <Field label="Email"><input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label={creating ? 'Password (at least 6 characters)' : 'Password'}><input type="password" autoComplete={creating ? 'new-password' : 'current-password'} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ok && !creating && submit()} /></Field>
+        {creating && <Field label="Password again"><input type="password" autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></Field>}
       </div>
+      {creating && pw2 && pw !== pw2 && <p className="warning-text" style={{ marginTop: 6 }}>The passwords don’t match.</p>}
       <div className="pill-row">
-        {!sent
-          ? <button className="primary-button small" disabled={busy || !/\S+@\S+/.test(email)} onClick={go(async () => { await sendCode(email); setSent(true); toast('Code sent. Check your email.') })}>Send code</button>
-          : <><button className="primary-button small" disabled={busy || code.trim().length < 6} onClick={go(() => verifyCode(email, code))}>Sign in</button>
-              <button className="outline-button" onClick={() => { setSent(false); setCode('') }}>Use another email</button></>}
+        <button className="primary-button small" disabled={busy || !ok} onClick={submit}>{creating ? 'Create account' : 'Sign in'}</button>
+        <button className="outline-button" onClick={() => { setMode(creating ? 'signin' : 'create'); setPw2('') }}>{creating ? 'I already have an account' : 'New here? Create an account'}</button>
       </div>
+      {!creating && <p className="muted-text" style={{ marginTop: 10 }}>Forgot your password? Ask whoever set up the family to reset it in Supabase (Authentication → Users).</p>}
     </Section>
+  )
+}
+
+function ChangePassword() {
+  const toast = useToast()
+  const [open, setOpen] = useState(false), [pw, setPw] = useState('')
+  if (!open) return <button className="outline-button" onClick={() => setOpen(true)}>Change password</button>
+  return (
+    <div className="form-grid">
+      <Field label="New password (at least 6 characters)"><input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+      <div style={{ alignSelf: 'end' }}><button className="primary-button small" disabled={pw.length < 6} onClick={() => changePassword(pw).then(() => { toast('Password changed'); setOpen(false); setPw('') }).catch((e) => toast(e.message, 'error'))}>Save</button></div>
+    </div>
   )
 }
 
@@ -91,10 +106,11 @@ function Synced({ status }) {
         <div className="pill-row"><button className="primary-button small" disabled={status.state === 'syncing'} onClick={() => syncNow()}>Sync now</button></div>
       </Section>
       {fam && <Section title="Invite family members">
-        <p className="muted-text">On their phone: install the app, open Family sync, sign in with their own email and enter this code.</p>
+        <p className="muted-text">On their phone: install the app, open Family sync, create an account with their own email and password, and enter this code.</p>
         <p style={{ fontSize: 28, letterSpacing: 4, margin: '10px 0' }}><strong>{fam.invite_code}</strong></p>
         {fam.role === 'owner' && <button className="outline-button" onClick={() => newInviteCode(fam.id).then((c) => { setFam({ ...fam, invite_code: c }); toast('New code made; the old one no longer works') }).catch((e) => toast(e.message, 'error'))}>Make a new code</button>}
       </Section>}
+      <Section title="Your account"><ChangePassword /></Section>
       <button className="logout-button" onClick={() => { if (window.confirm('Sign out? This phone keeps its records but stops syncing.')) signOut() }}><Icon name="user" size={18} /> Sign out</button>
     </>
   )
