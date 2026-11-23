@@ -25,7 +25,7 @@ npx cap add ios        # Mac only
 ## 2. Create the Supabase project (free)
 
 1. Sign up at supabase.com and click **New project**. Pick the region closest to you (Singapore for the Philippines).
-2. **SQL Editor → New query**: paste all of `supabase/migrations/0001_init.sql` and click **Run**.
+2. **SQL Editor → New query**: run the files in `supabase/migrations/` in order: `0001_init.sql`, then `0002_harden.sql`, then `0003_policies.sql`. (Already done for the `shiftly` project.)
 3. **Authentication → Sign In / Providers → Email**: keep it on. Turn **Confirm email** off, since the 6-digit code already confirms it.
 4. **Authentication → Email Templates → Magic Link**: the app signs in with a **code**, so make sure the email includes it. Replace the body with something like:
    ```html

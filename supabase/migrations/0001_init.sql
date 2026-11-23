@@ -9,7 +9,7 @@
 -- (web/src/sync.js). Every synced table has updated_at (set by the server) and every
 -- delete leaves a row in `tombstones`, so phones can ask "what changed since X?".
 
-create extension if not exists btree_gist;
+create extension if not exists btree_gist with schema extensions;
 
 -- ───────────────────────── households & membership ─────────────────────────
 create table public.households (
