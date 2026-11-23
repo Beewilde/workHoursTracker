@@ -2,11 +2,11 @@
 import React, { useEffect, useState } from 'react'
 import { useToast, downloadBackup } from './lib.js'
 import { Page, Icon, Field, Loading } from './ui.jsx'
-import { cloudConfigured, onSyncStatus, signIn, createAccount, changePassword, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, syncNow } from './cloud.js'
+import { cloudConfigured, onSyncStatus, syncStatus, signIn, createAccount, changePassword, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, syncNow } from './cloud.js'
 import { getEngine } from './storage.js'
 
 export const useSyncStatus = () => {
-  const [s, set] = useState(() => ({ state: 'off' }))
+  const [s, set] = useState(() => syncStatus())
   useEffect(() => onSyncStatus(set), [])
   return s
 }
@@ -62,7 +62,7 @@ function ChangePassword() {
 
 function ChooseFamily({ status }) {
   const toast = useToast()
-  const [fams, setFams] = useState(null), [name, setName] = useState('My family'), [code, setCode] = useState(''), [busy, setBusy] = useState(false)
+  const [fams, setFams] = useState(null), [name, setName] = useState('My family'), [code, setCode] = useState(''), [busy, setBusy] = useState(false), [creating, setCreating] = useState(false)
   useEffect(() => { listFamilies().then(setFams).catch((e) => { toast(e.message, 'error'); setFams([]) }) }, [])
   const run = (f) => async () => { setBusy(true); try { await f() } catch (e) { toast(e.message, 'error') } finally { setBusy(false) } }
   // joining replaces what is on this phone with the family's records
@@ -71,22 +71,38 @@ function ChooseFamily({ status }) {
   if (!fams) return <Loading />
   return (
     <>
-      {fams.length > 0 && <Section title="Your families">
-        {fams.map((f) => <div key={f.id} className="pill-row" style={{ alignItems: 'center' }}><strong style={{ flex: 1 }}>{f.name}</strong><span className="muted-text">{f.role}</span>
-          <button className="primary-button small" disabled={busy} onClick={run(async () => { if (okToReplace()) { await openFamily(f.id); toast('Family opened. Downloading records…') } })}>Use on this phone</button></div>)}
+      {fams.length > 0 && <Section title="Your family">
+        {fams.map((f) => <div key={f.id} className="pill-row" style={{ alignItems: 'center' }}><strong style={{ flex: 1 }}>{f.name}</strong>
+          <button className="primary-button small" disabled={busy} onClick={run(async () => { if (okToReplace()) await openFamily(f.id) })}>Open</button></div>)}
       </Section>}
       <Section title="Join your family">
-        <p className="muted-text">Ask whoever set it up for the invite code (it’s on their Family sync screen).</p>
-        <div className="form-grid" style={{ marginTop: 12 }}><Field label="Invite code"><input value={code} autoCapitalize="characters" onChange={(e) => setCode(e.target.value)} /></Field></div>
-        <div className="pill-row"><button className="primary-button small" disabled={busy || code.trim().length < 6} onClick={run(async () => { if (okToReplace()) { await joinFamily(code); toast('Joined. Downloading records…') } })}>Join</button></div>
+        <p className="muted-text">Enter the invite code from whoever set up the family (it’s on their Family sync screen).</p>
+        <div className="form-grid" style={{ marginTop: 12 }}><Field label="Invite code"><input value={code} autoCapitalize="characters" autoComplete="off" onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && code.trim().length >= 6 && run(async () => { if (okToReplace()) await joinFamily(code) })()} /></Field></div>
+        <div className="pill-row"><button className="primary-button small" disabled={busy || code.trim().length < 6} onClick={run(async () => { if (okToReplace()) await joinFamily(code) })}>Join</button></div>
       </Section>
-      <Section title="Or start a new family">
-        <p className="muted-text">Do this on ONE phone only — the one with the records you want to keep. {hasLocalData() ? 'This phone’s records will be uploaded.' : 'This phone has no records yet.'}</p>
-        <div className="form-grid" style={{ marginTop: 12 }}><Field label="Family name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
-        <div className="pill-row"><button className="outline-button" disabled={busy || !name.trim()} onClick={run(async () => { await createFamily(name); toast('Family created. Uploading records…') })}>Create family</button></div>
+      <Section title="Setting it up for the first time?">
+        {!creating ? <>
+          <p className="muted-text">Only ONE person creates the family. Everyone else joins with the code.</p>
+          <div className="pill-row"><button className="outline-button" onClick={() => setCreating(true)}>Create a new family</button></div>
+        </> : <>
+          <p className="muted-text">{hasLocalData() ? 'This phone’s records will be uploaded and become the family’s records.' : 'You’ll get an invite code to share with the others.'}</p>
+          <div className="form-grid" style={{ marginTop: 12 }}><Field label="Family name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
+          <div className="pill-row"><button className="primary-button small" disabled={busy || !name.trim()} onClick={run(() => createFamily(name))}>Create family</button>
+            <button className="outline-button" onClick={() => setCreating(false)}>Cancel</button></div>
+        </>}
       </Section>
       <button className="logout-button" onClick={() => signOut()}><Icon name="user" size={18} /> Sign out{status.email ? ` (${status.email})` : ''}</button>
     </>
+  )
+}
+
+// Shown before the app: sign in / create account, then join or create the family.
+export function AuthGate({ status }) {
+  return (
+    <main className="auth-screen">
+      <div className="auth-brand"><span><Icon name="clock" size={26} /></span><div><strong>Shiftly</strong><small>Work hours &amp; payout</small></div></div>
+      {status.state === 'signed-out' ? <SignIn /> : <><p className="auth-step">Signed in as <b>{status.email}</b></p><ChooseFamily status={status} /></>}
+    </main>
   )
 }
 

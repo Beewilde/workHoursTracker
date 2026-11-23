@@ -278,3 +278,11 @@ i.blue{background:#4169a1}i.violet{background:#7c6eab}i.green{background:#65a77b
 .segment-gap.lunch span { color:var(--muted); font-size:10px; font-weight:700; background:var(--surface); border-radius:99px; padding:2px 7px; }
 /* chosen option in a row of outline buttons (e.g. the day's lunch split) */
 .outline-button.active { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+/* sign-in / join screen shown before the app */
+.auth-screen { max-width: 520px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 32px) 18px 40px; }
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+.auth-brand span { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: var(--blue); color: #fff; }
+.auth-brand strong { display: block; font-size: 22px; }
+.auth-brand small { color: var(--muted); }
+.auth-step { color: var(--muted); margin: 0 0 12px; }
