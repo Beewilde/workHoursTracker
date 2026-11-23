@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 export const ToastCtx = createContext(() => {})
 export const useToast = () => useContext(ToastCtx)
 
-import { getEngine, storageInfo } from './storage.js'
+import { getEngine, storageInfo, subscribe } from './storage.js'
+import { saveFile } from './native.js'
 export { storageInfo }
 
 // Same call shape as the old server API, but answered by the engine inside the browser.
@@ -11,34 +12,33 @@ export async function api(path, { method = 'GET', body } = {}) {
   return getEngine().handle(method, path, body)
 }
 
-const save = (blob, name) => {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob); a.download = name
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000)
-}
+const save = (blob, name) => saveFile(blob, name)   // browser download, or the share sheet in the app
 export async function downloadExport(month, { workers = null, summary = true, ot = true, daily = true, weekday = true } = {}) {
   const [{ buildWorkbook, exportName }] = await Promise.all([import('../../shared/export.js')])
   const ctx = getEngine().exportCtx(month, workers)
   if (!ctx.workers.length) throw new Error('No workers selected')
   const buf = await buildWorkbook(ctx, { summary, otSummary: ot, daily, weekday })
-  save(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), exportName(month))
+  return save(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), exportName(month))
 }
 export function downloadBackup() {
   const { filename, json } = getEngine().backup()
-  save(new Blob([json], { type: 'application/json' }), filename)
+  return save(new Blob([json], { type: 'application/json' }), filename)
 }
-export const restoreBackup = async (text) => getEngine().restore(text)
-export const eraseAll = () => getEngine().reset()
+// with family sync on, these only change THIS phone: the next sync merges with the family copy
+export const restoreBackup = async (text) => { const r = getEngine().restore(text); (await import('./cloud.js')).forgetSyncedState(); return r }
+export const eraseAll = async () => { getEngine().reset(); (await import('./cloud.js')).forgetSyncedState() }
 export const loadDemo = () => getEngine().loadDemo()
 
-export function useLoad(url) {
-  const [s, set] = useState({ loading: true, data: null, error: null })
+// live: reload by itself when another phone's changes arrive. Screens with a form the user may be
+// typing in pass live: false and get `stale: true` instead, so nothing is overwritten under them.
+export function useLoad(url, { live = true } = {}) {
+  const [s, set] = useState({ loading: true, data: null, error: null, stale: false })
   const run = useCallback(() => {
-    if (!url) return set({ loading: false, data: null, error: null })
-    api(url).then((d) => set({ loading: false, data: d, error: null })).catch((e) => set({ loading: false, data: null, error: e.message }))
+    if (!url) return set({ loading: false, data: null, error: null, stale: false })
+    api(url).then((d) => set({ loading: false, data: d, error: null, stale: false })).catch((e) => set({ loading: false, data: null, error: e.message, stale: false }))
   }, [url])
   useEffect(() => { set((x) => ({ ...x, loading: true })); run() }, [run])
+  useEffect(() => subscribe((info) => { if (info?.remote) live ? run() : set((x) => ({ ...x, stale: true })) }), [run, live])
   return { ...s, reload: run }
 }
 

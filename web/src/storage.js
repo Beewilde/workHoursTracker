@@ -1,5 +1,7 @@
 // Saves the app's data on this device. Every change is written immediately to IndexedDB and mirrored
-// to localStorage (which is synchronous, so a change survives even if the tab is closed right away).
+// to localStorage (which is synchronous, so a change survives even if the app is closed right away).
+// In the installed app both live in the app's own private storage, not in a browser.
+// With family sync on (cloud.js) this copy is also uploaded to Supabase.
 import { createEngine, EMPTY } from './engine.js'
 
 const DB = 'work-hours', STORE = 'kv'
@@ -15,11 +17,13 @@ export const subscribe = (fn) => { listeners.add(fn); return () => listeners.del
 export const getEngine = () => engine
 const mode = () => { storageInfo.mode = idbOk ? 'idb' : lsOk ? 'local' : 'memory' }
 
-function persist(state) {
+// info.remote = true when the change came from another phone (sync), so screens reload
+// but the change is not sent back up again
+export function persist(state, info = {}) {
   state.savedAt = Date.now()
   if (lsOk) { try { localStorage.setItem('wh-state', JSON.stringify(state)) } catch { lsOk = false; mode() } }
   if (idbOk) idbSet('state', JSON.parse(JSON.stringify(state))).catch(() => { idbOk = false; mode() })
-  listeners.forEach((f) => f())
+  listeners.forEach((f) => f(info))
 }
 
 export async function initEngine() {

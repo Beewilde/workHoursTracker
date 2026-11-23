@@ -1,25 +1,36 @@
 {
-  "name": "work-hours-tracker-local",
-  "version": "1.0.0",
+  "name": "shiftly",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Work hours & payout tracker. Runs entirely in the browser; data stays on the device.",
+  "description": "Shiftly: work hours & payout tracker for a family. Android/iOS app (Capacitor) with offline-first Supabase sync.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test test/*.test.js",
-    "build:flat": "vite build --config vite.flat.config.js"
+    "build:flat": "vite build --config vite.flat.config.js",
+    "cap:sync": "vite build && cap sync",
+    "android": "vite build && cap sync android && cap open android",
+    "ios": "vite build && cap sync ios && cap open ios",
+    "android:run": "vite build && cap sync android && cap run android"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/ios": "^8.5.0",
+    "@capacitor/share": "^8.0.0",
+    "@supabase/supabase-js": "^2.104.0",
     "exceljs": "^4.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
     "@vitejs/plugin-react": "^6.2.1",
     "vite": "^8.3.5"
   }

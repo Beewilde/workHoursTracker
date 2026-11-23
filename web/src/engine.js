@@ -8,10 +8,32 @@ const STATUSES = ['worked', 'rd', 'not_worked', 'training', 'rdot']
 const ISO = /^\d{4}-\d{2}-\d{2}$/, MONTH = /^\d{4}-\d{2}$/
 const ENTRY_COLS = ['status', 'lunch_min', 'time_in', 'time_out', 'ot_hours', 'ot_start', 'ot_end', 'ot_position', 'ot_offer_id', 'rate_override', 'rate_override_reason', 'remark']
 export const APP_ID = 'work-hours-tracker'
+// Record ids are UUIDs so several phones can create records offline without clashing.
+export const newId = () => globalThis.crypto?.randomUUID?.() ??
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = (Math.random() * 16) | 0; return (c === 'x' ? r : (r & 3) | 8).toString(16) })
+const isUuid = (x) => typeof x === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x)
+const paidAt = (v) => (v == null ? null : typeof v === 'string' ? v : v.at)
+
+// Data saved by v1 used numbers from a counter as ids. Give every record a UUID and rewrite
+// every reference to it (entries, rates, bonuses, OT links, paid keys). Safe to run twice.
+export function migrateIds(S) {
+  const map = new Map(), id = (old) => { if (old == null || isUuid(old)) return old; if (!map.has(old)) map.set(old, newId()); return map.get(old) }
+  for (const w of S.workers || []) w.id = id(w.id)
+  for (const o of S.offers || []) o.id = id(o.id)
+  for (const e of S.entries || []) { e.id = id(e.id); e.worker_id = id(e.worker_id); if (e.ot_offer_id != null) e.ot_offer_id = id(e.ot_offer_id) }
+  for (const r of S.rates || []) r.worker_id = id(r.worker_id)
+  for (const b of S.bonuses || []) { b.id = id(b.id); b.worker_id = id(b.worker_id) }
+  const paid = {}
+  for (const [k, v] of Object.entries(S.paid || {})) { const [m, w] = k.split('|'); paid[`${m}|${id(isNaN(+w) ? w : +w)}`] = v }
+  S.paid = paid
+  delete S.seq
+  S.v = 2
+  return S
+}
 
 const defaultTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Manila' } catch { return 'Asia/Manila' } }
 export const EMPTY = () => ({
-  v: 1, seq: 1, workers: [], rates: [], entries: [], offers: [], bonuses: [], accountDays: {}, schedules: {}, paid: {}, lastBackupAt: null,
+  v: 2, workers: [], rates: [], entries: [], offers: [], bonuses: [], accountDays: {}, schedules: {}, paid: {}, lastBackupAt: null,
   settings: {
     timezone: defaultTz(), default_review_bonus: 10, rd_default: [2, 3, 4], reminder_days: 30,
     lunch_rule: 2, lunch_auto: true, lunch_minutes: 60, lunch_threshold: 8, lunch_from: null, shift_start: '16:00',
@@ -32,6 +54,9 @@ export function createEngine(state, save = () => {}) {
   const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: S.settings.timezone }).format(new Date())
   const ratesBy = () => { const o = {}; for (const r of [...S.rates].sort((a, b) => a.effective_from.localeCompare(b.effective_from))) (o[r.worker_id] ||= []).push(r); return o }
   const isPaid = (month, wid) => !!S.paid[`${month}|${wid}`]
+  const paidMonths = (wid) => Object.keys(S.paid).filter((k) => k.endsWith(`|${wid}`)).map((k) => k.split('|')[0]).sort()
+  // every [month, worker] pair that an OT offer's entries fall in and that is already paid
+  const paidUsing = (offerId) => S.entries.filter((e) => e.ot_offer_id === offerId && e.ot_hours > 0 && isPaid(e.date.slice(0, 7), e.worker_id))
   const offerFor = (date) => S.offers.find((o) => o.start_date <= date && o.end_date >= date)
   const entriesOn = (date) => S.entries.filter((e) => e.date === date)
   const lunchCfg = () => ({ auto: S.settings.lunch_auto, minutes: S.settings.lunch_minutes, threshold: S.settings.lunch_threshold, from: S.settings.lunch_from || null })
@@ -46,6 +71,7 @@ export function createEngine(state, save = () => {}) {
     st.lunch_rule = 2; st.lunch_threshold = 8
     save(S)
   }
+  migrateIds(S)
   ensureLunch()
   const active = () => S.workers.filter((w) => w.active)
   const capFor = (o, date) => (o.day_caps && o.day_caps[date] != null ? o.day_caps[date] : o.cap_hours)
@@ -81,8 +107,12 @@ export function createEngine(state, save = () => {}) {
     const input = (body.entries || []).filter((e) => e.status).map((e) => ({ ...e }))
     const seen = new Set(), existing = entriesOn(date)
     const locked = new Set(S.workers.map((w) => w.id).filter((id) => isPaid(month, id)))
+    // The Daily Log only shows ACTIVE workers, so only they can be cleared by leaving them out.
+    // Inactive workers' entries on this day are kept (they used to be deleted here).
+    const shown = new Set(S.workers.filter((w) => w.active).map((w) => w.id))
+    const keep = (x) => locked.has(x.worker_id) || !shown.has(x.worker_id)
     for (const e of input) {
-      const w = wmap.get(+e.worker_id)
+      const w = wmap.get(String(e.worker_id))
       need(w, 'Unknown worker'); need(!seen.has(w.id), 'Duplicate worker in this day'); seen.add(w.id)
       need(STATUSES.includes(e.status), 'Bad status')
       e.worker_id = w.id
@@ -108,7 +138,7 @@ export function createEngine(state, save = () => {}) {
       }
     }
     // locked workers that are not in the payload still count for coverage and the OT cap
-    const covInput = [...input, ...existing.filter((x) => locked.has(x.worker_id) && !seen.has(x.worker_id)).map((x) => ({ ...x, __skip: true }))]
+    const covInput = [...input, ...existing.filter((x) => keep(x) && !seen.has(x.worker_id)).map((x) => ({ ...x, __skip: true }))]
     const cov = coverage(covInput.filter((e) => e.status === 'worked' || e.status === 'training'))
     const warnings = []
     if (cov.status === 'overlap') {
@@ -142,12 +172,12 @@ export function createEngine(state, save = () => {}) {
     const acct = a && { date, company_hours: num(a.company_hours, 'Company hours', { nullable: true, max: 48 }), lunch_hours: num(a.lunch_hours, 'Lunch hours', { nullable: true, max: 12 }), note: a.note || null }
 
     // all checks passed: write
-    S.entries = S.entries.filter((x) => !(x.date === date && !seen.has(x.worker_id) && !locked.has(x.worker_id)))
+    S.entries = S.entries.filter((x) => !(x.date === date && !seen.has(x.worker_id) && !keep(x)))
     for (const e of input.filter((x) => !x.__skip)) {
       const row = { ...Object.fromEntries(ENTRY_COLS.map((k) => [k, e[k] ?? null])), worker_id: e.worker_id, date, ot_hours: e.ot_hours || 0 }
       const i = S.entries.findIndex((x) => x.worker_id === e.worker_id && x.date === date)
       if (i >= 0) S.entries[i] = { ...S.entries[i], ...row }
-      else S.entries.push({ id: S.seq++, ...row })
+      else S.entries.push({ id: newId(), ...row })
     }
     if (acct) S.accountDays[date] = acct
     save(S)
@@ -179,12 +209,12 @@ export function createEngine(state, save = () => {}) {
     return { o, warnings: days > 14 ? [`This offer is ${days} days long. Offers are usually 14 days or less.`] : [] }
   }
   function bonusBody(b) {
-    need(S.workers.some((w) => w.id === +b.worker_id), 'Choose a worker')
+    need(S.workers.some((w) => w.id === String(b.worker_id)), 'Choose a worker')
     need(ISO.test(b.review_date || ''), 'Enter the review date')
     const pay_month = b.pay_month || b.review_date.slice(0, 7)
     need(MONTH.test(pay_month), 'Bad pay month')
-    if (isPaid(pay_month, +b.worker_id)) throw err(409, 'That month is marked paid for this worker')
-    return { worker_id: +b.worker_id, review_date: b.review_date, pay_month, reference: b.reference || null, note: b.note || null, chat_time: toMin(b.chat_time) != null ? b.chat_time : null, amount: num(b.amount, 'Bonus amount', { max: 10000 }) }
+    if (isPaid(pay_month, String(b.worker_id))) throw err(409, 'That month is marked paid for this worker')
+    return { worker_id: String(b.worker_id), review_date: b.review_date, pay_month, reference: b.reference || null, note: b.note || null, chat_time: toMin(b.chat_time) != null ? b.chat_time : null, amount: num(b.amount, 'Bonus amount', { max: 10000 }) }
   }
 
   const routes = []
@@ -224,18 +254,21 @@ export function createEngine(state, save = () => {}) {
     const rate = num(body.rate, 'Hourly rate'), from = body.effective_from || '2000-01-01'
     need(ISO.test(from), 'Bad date')
     if (S.workers.some((w) => w.name.toLowerCase() === name.toLowerCase())) throw err(409, 'That name is already used')
-    const w = { id: S.seq++, name, color: COLORS[S.workers.length % COLORS.length], active: true }
+    const w = { id: newId(), name, color: COLORS[S.workers.length % COLORS.length], active: true }
     S.workers.push(w); S.rates.push({ worker_id: w.id, effective_from: from, rate })
     return commit(workerView(w))
   })
   on('POST', '/workers/:id/rates', ({ params: [id], body }) => {
-    const w = S.workers.find((x) => x.id === +id)
+    const w = S.workers.find((x) => x.id === id)
     need(w, 'Unknown worker'); need(ISO.test(body.effective_from || ''), 'Bad date')
+    const hit = paidMonths(w.id).filter((m) => m >= body.effective_from.slice(0, 7))
+    if (hit.length) throw err(409, `${w.name}'s ${hit[0]} is already paid. A new rate can only start after the last paid month.`)
+    S.rates = S.rates.filter((r) => !(r.worker_id === w.id && r.effective_from === body.effective_from))
     S.rates.push({ worker_id: w.id, effective_from: body.effective_from, rate: num(body.rate, 'Hourly rate') })
     return commit(workerView(w))
   })
   on('POST', '/workers/:id/active', ({ params: [id], body }) => {
-    const w = S.workers.find((x) => x.id === +id)
+    const w = S.workers.find((x) => x.id === id)
     need(w, 'Unknown worker'); w.active = !!body.active
     return commit(workerView(w))
   })
@@ -255,7 +288,10 @@ export function createEngine(state, save = () => {}) {
     const { report: rep, stats } = report(month)
     const rows = S.workers.filter((w) => w.active || rep[w.id].total > 0).map((w) => {
       const { rows: _r, bonuses: _b, ...t } = rep[w.id]
-      return { worker: { id: w.id, name: w.name, color: w.color, active: w.active }, ...t, paidAt: S.paid[`${month}|${w.id}`] || null }
+      const p = S.paid[`${month}|${w.id}`]
+      const snap = p && typeof p === 'object' ? p : null
+      return { worker: { id: w.id, name: w.name, color: w.color, active: w.active }, ...t, paidAt: paidAt(p),
+        paidTotal: snap ? snap.total : null, changedSincePaid: !!snap && Math.abs(snap.total - t.total) > 0.004 }
     })
     const sum = (k) => Math.round(rows.reduce((s, r) => s + r[k], 0) * 100) / 100
     return {
@@ -265,26 +301,33 @@ export function createEngine(state, save = () => {}) {
     }
   })
   on('PUT', '/paid/:m/:w', ({ params: [month, wid], body }) => {
-    need(MONTH.test(month) && S.workers.some((w) => w.id === +wid), 'Bad request')
+    need(MONTH.test(month) && S.workers.some((w) => w.id === wid), 'Bad request')
     if (body.paid) {
-      const open = S.offers.find((o) => o.start_date.slice(0, 7) <= month && o.end_date.slice(0, 7) >= month && o.end_date >= today() && S.entries.some((e) => e.ot_offer_id === o.id && e.worker_id === +wid && e.date.startsWith(month)))
+      const open = S.offers.find((o) => o.start_date.slice(0, 7) <= month && o.end_date.slice(0, 7) >= month && o.end_date >= today() && S.entries.some((e) => e.ot_offer_id === o.id && e.worker_id === wid && e.date.startsWith(month)))
       if (open) throw err(409, `"${open.name}" is still running, so OT pay is provisional. Mark paid after ${open.end_date}.`)
-      S.paid[`${month}|${wid}`] = new Date().toISOString()
+      const r = report(month).report[wid]
+      // keep what was paid, so later setting changes can be spotted instead of silently changing history
+      S.paid[`${month}|${wid}`] = { at: new Date().toISOString(), total: r.total, regularPay: r.regularPay, otPay: r.otPay, bonusTotal: r.bonusTotal, regularHours: r.regularHours, otHours: r.otHours }
     } else delete S.paid[`${month}|${wid}`]
     return commit({ ok: true })
   })
 
   on('GET', '/offers', () => offersView())
-  on('POST', '/offers', ({ body }) => { const { o, warnings } = offerBody(body); const row = { id: S.seq++, ...o, day_caps: {} }; S.offers.push(row); return commit({ id: row.id, warnings }) })
+  on('POST', '/offers', ({ body }) => { const { o, warnings } = offerBody(body); const row = { id: newId(), ...o, day_caps: {} }; S.offers.push(row); return commit({ id: row.id, warnings }) })
   on('PUT', '/offers/:id', ({ params: [id], body }) => {
-    const i = S.offers.findIndex((o) => o.id === +id)
+    const i = S.offers.findIndex((o) => o.id === id)
     need(i >= 0, 'Not found')
-    const { o, warnings } = offerBody(body, +id)
-    S.offers[i] = { id: +id, ...o, day_caps: S.offers[i].day_caps || {} }
-    return commit({ id: +id, warnings })
+    const { o, warnings } = offerBody(body, id)
+    const cur = S.offers[i], payKeys = ['start_date', 'end_date', 'min_hours', 'qualified_rate', 'below_min_rate', 'tier_mode']
+    if (payKeys.some((k) => (cur[k] ?? null) !== (o[k] ?? null)) && paidUsing(id).length)
+      throw err(409, `"${cur.name}" has OT in a month that is already paid. Unmark it as paid to change the offer's dates or rates.`)
+    const orphan = S.entries.find((e) => e.ot_offer_id === id && e.ot_hours > 0 && (e.date < o.start_date || e.date > o.end_date))
+    if (orphan) throw err(409, `There is OT on ${orphan.date} that would fall outside the new dates.`)
+    S.offers[i] = { ...S.offers[i], ...o, id, day_caps: S.offers[i].day_caps || {} }
+    return commit({ id, warnings })
   })
   on('PUT', '/offers/:id/day-cap', ({ params: [id], body }) => {
-    const o = S.offers.find((x) => x.id === +id)
+    const o = S.offers.find((x) => x.id === id)
     need(o, 'Not found'); need(ISO.test(body.date || '') && body.date >= o.start_date && body.date <= o.end_date, 'That date is outside the offer')
     o.day_caps ||= {}
     if (body.hours === '' || body.hours == null) delete o.day_caps[body.date]
@@ -292,15 +335,15 @@ export function createEngine(state, save = () => {}) {
     return commit({ ok: true })
   })
   on('DELETE', '/offers/:id', ({ params: [id] }) => {
-    if (S.entries.some((e) => e.ot_offer_id === +id && e.ot_hours > 0)) throw err(409, 'This offer already has OT entries and cannot be deleted')
-    S.offers = S.offers.filter((o) => o.id !== +id)
+    if (S.entries.some((e) => e.ot_offer_id === id && e.ot_hours > 0)) throw err(409, 'This offer already has OT entries and cannot be deleted')
+    S.offers = S.offers.filter((o) => o.id !== id)
     return commit({ ok: true })
   })
 
   on('GET', '/bonuses', ({ query }) => {
     need(MONTH.test(query.month || ''), 'Bad month')
     return S.bonuses.filter((b) => b.pay_month === query.month).map((b) => { const w = S.workers.find((x) => x.id === b.worker_id); return { ...b, worker_name: w?.name, color: w?.color } })
-      .sort((a, b) => b.review_date.localeCompare(a.review_date) || b.id - a.id)
+      .sort((a, b) => b.review_date.localeCompare(a.review_date) || String(b.id).localeCompare(String(a.id)))
   })
   on('GET', '/covered', ({ query: { date, time } }) => {
     const t = toMin(time)
@@ -308,18 +351,18 @@ export function createEngine(state, save = () => {}) {
     return entriesOn(date).filter((e) => (e.status === 'worked' || e.status === 'training') && (t - toMin(e.time_in) + 1440) % 1440 < spanMin(e.time_in, e.time_out))
       .map((e) => ({ id: e.worker_id, name: S.workers.find((w) => w.id === e.worker_id)?.name }))
   })
-  on('POST', '/bonuses', ({ body }) => { const row = { id: S.seq++, ...bonusBody(body) }; S.bonuses.push(row); return commit({ id: row.id }) })
+  on('POST', '/bonuses', ({ body }) => { const row = { id: newId(), ...bonusBody(body) }; S.bonuses.push(row); return commit({ id: row.id }) })
   on('PUT', '/bonuses/:id', ({ params: [id], body }) => {
-    const i = S.bonuses.findIndex((b) => b.id === +id)
+    const i = S.bonuses.findIndex((b) => b.id === id)
     need(i >= 0, 'Not found')
     if (isPaid(S.bonuses[i].pay_month, S.bonuses[i].worker_id)) throw err(409, 'That month is marked paid')
-    S.bonuses[i] = { id: +id, ...bonusBody(body) }
+    S.bonuses[i] = { ...S.bonuses[i], ...bonusBody(body), id }
     return commit({ ok: true })
   })
   on('DELETE', '/bonuses/:id', ({ params: [id] }) => {
-    const old = S.bonuses.find((b) => b.id === +id)
+    const old = S.bonuses.find((b) => b.id === id)
     if (old && isPaid(old.pay_month, old.worker_id)) throw err(409, 'That month is marked paid')
-    S.bonuses = S.bonuses.filter((b) => b.id !== +id)
+    S.bonuses = S.bonuses.filter((b) => b.id !== id)
     return commit({ ok: true })
   })
 
@@ -357,7 +400,7 @@ export function createEngine(state, save = () => {}) {
       const workers = S.workers.filter((w) => (workerIds ? workerIds.includes(w.id) : w.active))
       return structuredClone({
         month, workers, rates: ratesBy(), entries: S.entries, offers: S.offers, bonuses: S.bonuses, today: today(),
-        paid: Object.fromEntries(workers.filter((w) => S.paid[`${month}|${w.id}`]).map((w) => [w.id, S.paid[`${month}|${w.id}`]])),
+        paid: Object.fromEntries(workers.filter((w) => S.paid[`${month}|${w.id}`]).map((w) => [w.id, paidAt(S.paid[`${month}|${w.id}`])])),
         accountDays: S.accountDays, lunch: lunchCfg(),
       })
     },
@@ -373,6 +416,7 @@ export function createEngine(state, save = () => {}) {
         throw err(400, 'That file is not a Work Hours & Payout backup')
       for (const k of Object.keys(S)) delete S[k]
       Object.assign(S, EMPTY(), d)
+      migrateIds(S)
       ensureLunch()
       save(S)
       return { entries: S.entries.length }
@@ -382,11 +426,11 @@ export function createEngine(state, save = () => {}) {
       need(S.entries.length === 0 && S.workers.length === 0, 'Sample data can only be loaded into an empty app')
       const ids = {}
       for (const [n, c] of [['Alex', COLORS[0]], ['Bo', COLORS[1]], ['Jo', COLORS[2]], ['Sam', COLORS[3]]]) {
-        const w = { id: S.seq++, name: n, color: c, active: true }; S.workers.push(w); S.rates.push({ worker_id: w.id, effective_from: '2026-01-01', rate: 5 }); ids[n] = w.id
+        const w = { id: newId(), name: n, color: c, active: true }; S.workers.push(w); S.rates.push({ worker_id: w.id, effective_from: '2026-01-01', rate: 5 }); ids[n] = w.id
       }
       S.schedules['2026-10'] = [2, 3, 4]
       const d = (n) => `2026-10-${String(n).padStart(2, '0')}`
-      const add = (w, n, status, a, b, rate, why) => S.entries.push({ id: S.seq++, worker_id: ids[w], date: d(n), status, time_in: a || null, time_out: b || null, ot_hours: 0, ot_start: null, ot_end: null, ot_position: null, ot_offer_id: null, rate_override: rate ?? null, rate_override_reason: why ?? null, remark: null })
+      const add = (w, n, status, a, b, rate, why) => S.entries.push({ id: newId(), worker_id: ids[w], date: d(n), status, time_in: a || null, time_out: b || null, ot_hours: 0, ot_start: null, ot_end: null, ot_position: null, ot_offer_id: null, rate_override: rate ?? null, rate_override_reason: why ?? null, remark: null })
       ;[1, 6, 7, 8, 13, 14, 15, 20, 21, 22, 27, 28, 29].forEach((n) => add('Alex', n, 'rd'))
       ;[[4, '16:00', '20:30'], [10, '20:30', '01:00'], [11, '20:30', '01:00'], [17, '20:30', '01:00'], [18, '16:00', '20:30'], [25, '20:30', '01:00']].forEach(([n, a, b]) => add('Alex', n, 'worked', a, b))
       add('Alex', 31, 'worked', '16:00', '17:20', 5.5, 'Rate shown on the original sheet')

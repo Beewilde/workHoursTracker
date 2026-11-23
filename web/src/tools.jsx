@@ -16,7 +16,7 @@ export function Welcome() {
           <li>Log each day in the <b>Daily Log</b>.</li>
           <li>At month end open <b>Month Summary</b> or <b>Import / Export</b> to get the Excel file.</li>
         </ol>
-        <p className="muted-text">Everything is saved on this device only. Download a backup from <b>Import / Export</b> regularly.</p>
+        <p className="muted-text">Everything is saved on this phone. To share with your family, turn on <b>Family sync</b> under More. Download a backup from <b>Import / Export</b> regularly.</p>
         <div className="pill-row"><button className="primary-button" onClick={() => go('workers')}><Icon name="plus" size={17} /> Add workers</button><button className="outline-button" onClick={() => go('settings')}>Try sample data</button></div>
       </section>
     </Page>
@@ -167,7 +167,7 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
           <div className="form-grid" style={{ marginTop: 12 }}><Field label="Remind me to back up every (days)"><input type="number" min="1" defaultValue={s.reminder_days} onBlur={(e) => put({ reminder_days: e.target.value })} /></Field></div></div>
         {!meta.hasData && <div className="block"><button className="outline-button" onClick={() => { try { loadDemo(); toast('Sample data loaded (October 2026)'); onChange() } catch (e) { toast(e.message, 'error') } }}>Load sample data</button></div>}
       </section>
-      <button className="logout-button" onClick={() => { if (window.confirm('Erase ALL data from this device? Download a backup first if you might need it.') && window.confirm('Really erase everything? This cannot be undone.')) { eraseAll(); toast('Everything erased'); setTimeout(() => location.reload(), 500) } }}><Icon name="trash" size={18} /> Erase all data</button>
+      <button className="logout-button" onClick={() => { if (window.confirm('Erase ALL data from this phone? Download a backup first if you might need it. With family sync on, the family copy is kept and comes back on the next sync.') && window.confirm('Really erase everything? This cannot be undone.')) { eraseAll().then(() => { toast('Everything erased from this phone'); setTimeout(() => location.reload(), 500) }) } }}><Icon name="trash" size={18} /> Erase all data</button>
     </Page>
   )
 }
@@ -175,10 +175,10 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
 export function MorePage({ dark, setDark }) {
   const { go } = useShell()
   const items = [['account', 'Account Day', 'clock', 'Divide company shifts'], ['ot', 'OT Offers', 'briefcase', 'Manage pooled overtime'], ['bonuses', 'Review Bonuses', 'gift', 'Track customer reviews'],
-    ['workers', 'Workers & Rates', 'users', 'Rates and team'], ['files', 'Import / Export', 'file', 'Excel workbooks and backups'], ['settings', 'Settings', 'settings', 'Schedule and preferences']]
+    ['workers', 'Workers & Rates', 'users', 'Rates and team'], ['family', 'Family sync', 'users', 'Share records with your family'], ['files', 'Import / Export', 'file', 'Excel workbooks and backups'], ['settings', 'Settings', 'settings', 'Schedule and preferences']]
   return (
     <Page title="More" eyebrow="Tools">
-      <section className="more-profile"><span className="avatar avatar-owner large">SH</span><div><h2>Shiftly</h2><p>Work &amp; payout · stored on this device</p></div></section>
+      <section className="more-profile"><span className="avatar avatar-owner large">SH</span><div><h2>Shiftly</h2><p>Work &amp; payout</p></div></section>
       <div className="more-grid">
         {items.map(([id, label, icon, sub]) => <button key={id} onClick={() => go(id)}><span className="menu-icon"><Icon name={icon} /></span><div><strong>{label}</strong><small>{sub}</small></div><Icon name="chevron" size={17} /></button>)}
         <button onClick={() => setDark(!dark)}><span className="menu-icon"><Icon name={dark ? 'sun' : 'moon'} /></span><div><strong>{dark ? 'Light mode' : 'Dark mode'}</strong><small>Change the appearance</small></div></button>

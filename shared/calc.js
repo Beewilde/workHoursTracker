@@ -105,7 +105,7 @@ export function evalOffers(offers, entries, ratesByWorker, today) {
   for (const o of offers) {
     const list = entries
       .filter((e) => e.ot_offer_id === o.id && e.ot_hours > 0)
-      .sort((a, b) => a.date.localeCompare(b.date) || (toMin(a.ot_start) ?? 0) - (toMin(b.ot_start) ?? 0) || a.id - b.id)
+      .sort((a, b) => a.date.localeCompare(b.date) || (toMin(a.ot_start) ?? 0) - (toMin(b.ot_start) ?? 0) || String(a.id).localeCompare(String(b.id)))
     const total = list.reduce((s, e) => s + e.ot_hours, 0)
     const final = today > o.end_date
     const qualified = total >= o.min_hours

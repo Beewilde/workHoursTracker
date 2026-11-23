@@ -1,0 +1,7 @@
+{
+  "appId": "com.beewilde.shiftly",
+  "appName": "Shiftly",
+  "webDir": "web/dist",
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "automatic" }
+}

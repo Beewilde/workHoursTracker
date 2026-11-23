@@ -14,8 +14,12 @@ export const isTimed = (f) => f.status === 'worked' || f.status === 'training'
 
 export function useDay(date) {
   const toast = useToast()
-  const { data: day, loading, error, reload } = useLoad(`/day/${date}`)
-  const [form, setForm] = useState(null)
+  const { data: day, loading, error, reload, stale } = useLoad(`/day/${date}`, { live: false })
+  const [form, setFormRaw] = useState(null)
+  const [touched, setTouched] = useState(false)
+  const setForm = (f) => { setTouched(true); setFormRaw(f) }
+  // another phone changed data: reload right away unless the user is in the middle of editing this day
+  useEffect(() => { if (stale && !touched) reload() }, [stale, touched, reload])
   const [saving, setSaving] = useState(false)
   useEffect(() => {
     if (!day) return
@@ -26,7 +30,8 @@ export function useDay(date) {
         ? { status: e.status, time_in: e.time_in || '', time_out: e.time_out || '', ot_hours: e.status === 'rdot' ? '' : e.ot_hours || '', lunch_min: e.lunch_min ?? '', rate_override: e.rate_override ?? '', rate_override_reason: e.rate_override_reason || '', remark: e.remark || '' }
         : { ...blank, status: day.isRestDay ? 'rd' : '', suggested: day.isRestDay }
     }
-    setForm({ w, ot_position: day.workers.find((x) => x.entry?.ot_position)?.entry.ot_position || 'after',
+    setTouched(false)
+    setFormRaw({ w, ot_position: day.workers.find((x) => x.entry?.ot_position)?.entry.ot_position || 'after',
       account: { company_hours: day.account.company_hours ?? '', lunch_hours: day.account.lunch_hours ?? '', note: day.account.note || '' } })
   }, [day])
   const ready = !!(day && form && day.date === date)
@@ -70,7 +75,7 @@ export function useDay(date) {
       toast(e.message, 'error')
     } finally { setSaving(false) }
   }
-  return { day, form, setForm, setW, ready, loading, error, reload, save, saving, cov, plan, autoPlan, hoursDraft, typeHours, endHours }
+  return { day, form, setForm, setW, ready, loading, error, reload, save, saving, cov, plan, autoPlan, hoursDraft, typeHours, endHours, stale: stale && touched }
 }
 
 export function DayNav({ date, setDate, today }) {
@@ -105,10 +110,10 @@ export function DailyLog({ date, setDate, today }) {
   const d = useDay(date)
   const [custom, setCustom] = useState({})
   const [more, setMore] = useState({})
+  const toast = useToast()   // hooks must run before the early returns below
   const eyebrow = fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric' })
   if (d.error) return <Page title="Daily Log" eyebrow={eyebrow}><ErrorBox error={d.error} /></Page>
   if (!d.ready) return <Page title="Daily Log" eyebrow={eyebrow}><Loading /></Page>
-  const toast = useToast()
   const { day, form, setW, plan, hoursDraft, typeHours, endHours } = d
   const rows = day.workers.map((w) => ({ w, f: form.w[w.id] }))
   const logged = rows.filter((r) => r.f.status).length
@@ -122,6 +127,7 @@ export function DailyLog({ date, setDate, today }) {
   return (
     <>
       <Page title="Daily Log" eyebrow={eyebrow} narrow={false} className="daily-page">
+        {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the family updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
         <DayNav date={date} setDate={setDate} today={today} />
         <section className="overview-card">
           <div className="overview-title"><div><p className="eyebrow">Daily overview</p><h2>Team status</h2></div><span className="completion">{logged}/{n} logged</span></div>
@@ -245,10 +251,10 @@ export function AccountDay({ date, setDate, today }) {
   const d = useDay(date)
   const [edit, setEdit] = useState(null)
   const [adding, setAdding] = useState(false)
+  const toast = useToast()   // hooks must run before the early returns below
   const eyebrow = 'Shift coverage'
   if (d.error) return <Page title="Account Day" eyebrow={eyebrow}><ErrorBox error={d.error} /></Page>
   if (!d.ready) return <Page title="Account Day" eyebrow={eyebrow}><Loading /></Page>
-  const toast = useToast()
   const { day, form, setW, setForm, cov, plan, autoPlan, hoursDraft, typeHours, endHours } = d
   const saveCap = (v) => {
     const hours = v === '' || Number(v) === Number(day.offer.cap_hours) ? '' : v
@@ -275,6 +281,7 @@ export function AccountDay({ date, setDate, today }) {
   }
   return (
     <Page title="Account Day" eyebrow={eyebrow}>
+      {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the family updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
       <DayNav date={date} setDate={setDate} today={today} />
       <section className="surface account-shift">
         <div className="section-heading" style={{ marginTop: 0 }}>

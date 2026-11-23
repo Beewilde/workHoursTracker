@@ -101,7 +101,7 @@ export function SummaryPage({ month, setMonth }) {
             <div className="worker-identity"><Avatar w={r.worker} small /><div><strong>{r.worker.name}</strong><small>{r.shifts} {r.shifts === 1 ? "shift" : "shifts"} · {hm(r.regularHours) || "0h"}</small></div></div>
             <span className="desktop-cell">{r.shifts}</span><span className="desktop-cell">{$(r.regularPay)}</span>
             <span className="desktop-cell">{$(r.otPay)}</span><span className="desktop-cell">{$(r.bonusTotal)}</span>
-            <strong className="row-total">{$(r.total)}</strong>
+            <strong className="row-total" title={r.changedSincePaid ? `Paid ${$(r.paidTotal)}; the settings now give ${$(r.total)}` : undefined}>{r.changedSincePaid ? <>{$(r.paidTotal)} <small className="muted-text">now {$(r.total)}</small></> : $(r.total)}</strong>
             <button className={`payment-button ${r.paidAt ? 'paid' : ''}`} onClick={() => toggle(r)}>{r.paidAt ? <><Icon name="lock" size={14} /> Paid</> : 'Mark paid'}</button>
           </div>
         ))}
@@ -226,7 +226,7 @@ export function BonusesPage({ month, setMonth, workers }) {
             <div className="form-grid" style={{ marginTop: 0 }}><Field label="Review date"><input type="date" {...bind(edit, setEdit, 'review_date')} /></Field><Field label="Customer chat time (optional)"><input type="time" {...bind(edit, setEdit, 'chat_time')} /></Field></div>
             {edit.chat_time && <div><button className="outline-button" onClick={suggest}>Who was on shift then?</button>
               {who && <div className="pill-row">{who.length ? who.map((w) => <button key={w.id} className="outline-button" onClick={() => setEdit({ ...edit, worker_id: w.id })}>{w.name}</button>) : <span className="muted-text">Nobody was logged at that time.</span>}</div>}</div>}
-            <Field label="Credit to"><select value={edit.worker_id} onChange={(e) => setEdit({ ...edit, worker_id: +e.target.value })}>{workers.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
+            <Field label="Credit to"><select value={edit.worker_id} onChange={(e) => setEdit({ ...edit, worker_id: e.target.value })}>{workers.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
             <Field label="Reviewer name or link"><input {...bind(edit, setEdit, 'reference')} /></Field>
             <div className="form-grid" style={{ marginTop: 0 }}><Field label="Bonus ($)"><input type="number" step="0.01" {...bind(edit, setEdit, 'amount')} /></Field><Field label="Pay month (YYYY-MM, optional)"><input {...bind(edit, setEdit, 'pay_month')} placeholder={edit.review_date?.slice(0, 7)} /></Field></div>
             <Field label="Note"><input {...bind(edit, setEdit, 'note')} /></Field>

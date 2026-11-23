@@ -5,10 +5,12 @@ import { initEngine, getEngine, subscribe } from './storage.js'
 import { DailyLog, AccountDay } from './daily.jsx'
 import { CalendarPage, SummaryPage, OffersPage, BonusesPage, WorkersPage } from './views.jsx'
 import { FilesPage, SettingsPage, MorePage, Welcome } from './tools.jsx'
+import { FamilyPage, useSyncStatus, syncLabel } from './family.jsx'
+import { startCloud } from './cloud.js'
 
 const NAV = [
   ['daily', 'Daily Log', 'grid'], ['account', 'Account Day', 'clock'], ['calendar', 'Calendar', 'calendar'], ['summary', 'Month Summary', 'wallet'],
-  ['ot', 'OT Offers', 'briefcase'], ['bonuses', 'Review Bonuses', 'gift'], ['workers', 'Workers & Rates', 'users'], ['files', 'Import / Export', 'file'], ['settings', 'Settings', 'settings'],
+  ['ot', 'OT Offers', 'briefcase'], ['bonuses', 'Review Bonuses', 'gift'], ['workers', 'Workers & Rates', 'users'], ['files', 'Import / Export', 'file'], ['family', 'Family sync', 'users'], ['settings', 'Settings', 'settings'],
 ]
 const BOTTOM = [['daily', 'Daily Log', 'grid'], ['calendar', 'Calendar', 'calendar'], ['summary', 'Summary', 'wallet'], ['more', 'More', 'more']]
 
@@ -21,6 +23,7 @@ function MainApp({ dark, setDark }) {
   const [date, setDate] = useState(null)
   const [month, setMonth] = useState(null)
   const [filesTab, setFilesTab] = useState('export')
+  const sync = useSyncStatus()
   if (!settings || !workers) return <div className="app-main" style={{ paddingLeft: 0 }}><Loading /></div>
   const today = todayIn(settings.timezone), d = date || today, m = month || today.slice(0, 7)
   const active = workers.filter((w) => w.active)
@@ -38,6 +41,7 @@ function MainApp({ dark, setDark }) {
     files: <FilesPage key={active.length} month={m} setMonth={setMonth} workers={active} tab={filesTab} setTab={setFilesTab} />,
     settings: <SettingsPage month={m} setMonth={setMonth} onChange={() => { reloadSettings(); reloadWorkers() }} dark={dark} setDark={setDark} />,
     more: <MorePage dark={dark} setDark={setDark} />,
+    family: <FamilyPage />,
   }[page]
   const bottomActive = BOTTOM.some((b) => b[0] === page) ? page : 'more'
   return (
@@ -49,7 +53,7 @@ function MainApp({ dark, setDark }) {
         </nav>
         <div className="sidebar-bottom">
           <button onClick={() => setDark(!dark)}><Icon name={dark ? 'sun' : 'moon'} /><span>{dark ? 'Light mode' : 'Dark mode'}</span></button>
-          <div className="side-profile"><span className="avatar avatar-owner">SH</span><div><strong>This device</strong><small>{days === null ? 'No backup yet' : days === 0 ? 'Backed up today' : `Backup ${days}d ago`}</small></div><Icon name="more" size={17} /></div>
+          <div className="side-profile" role="button" onClick={() => go('family')}><span className="avatar avatar-owner">SH</span><div><strong>{sync.household_id ? 'Family sync' : 'This device'}</strong><small>{sync.household_id || sync.state !== 'off' ? syncLabel(sync) : days === null ? 'No backup yet' : days === 0 ? 'Backed up today' : `Backup ${days}d ago`}</small></div><Icon name="more" size={17} /></div>
         </div>
       </aside>
       <div className="app-main">{screen}</div>
@@ -64,7 +68,7 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [toast, setToast] = useState(null)
   const [dark, setDarkState] = useState(() => { try { return (localStorage.getItem('shiftly-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark' } catch { return false } })
-  useEffect(() => { initEngine().then(() => setReady(true)) }, [])
+  useEffect(() => { initEngine().then(() => { setReady(true); startCloud().catch(() => {}) }) }, [])
   const setDark = (v) => { setDarkState(v); try { localStorage.setItem('shiftly-theme', v ? 'dark' : 'light') } catch { /* ignore */ } }
   const show = (msg, kind = 'ok') => { setToast({ msg, kind }); clearTimeout(show.t); show.t = setTimeout(() => setToast(null), 4500) }
   return (
