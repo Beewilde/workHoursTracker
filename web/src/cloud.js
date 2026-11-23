@@ -45,13 +45,18 @@ function startSync(meta) {
 }
 
 // called once when the app opens (after the local data is loaded)
+// A phone that already belongs to a family always opens into the app, even with no signal
+// (the saved login may need the network to refresh); it only asks to sign in again when it
+// is online and the login is really gone.
 export async function startCloud() {
   if (!supabase) return
-  supabase.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') { stopSync(); emit({ state: 'signed-out' }) } })
-  const { data: { session } } = await supabase.auth.getSession()
+  supabase.auth.onAuthStateChange((event) => { if (event === 'SIGNED_OUT') { stopSync(); emit({ state: 'signed-out', household_id: null }) } })
   const meta = loadMeta()
-  if (session && meta.household_id) startSync(meta)
-  else emit({ state: session ? 'no-family' : 'signed-out', email: session?.user?.email })
+  let session = null
+  try { session = (await supabase.auth.getSession()).data.session } catch { /* offline or storage blocked */ }
+  if (meta.household_id && (session || !navigator.onLine)) return startSync(meta)
+  if (meta.household_id && !session) saveMeta({})            // online but signed out: start over
+  emit({ state: session ? 'no-family' : 'signed-out', email: session?.user?.email, household_id: null })
 }
 
 // ── sign-in with email + password (Supabase sends no emails: "Confirm email" is off) ──

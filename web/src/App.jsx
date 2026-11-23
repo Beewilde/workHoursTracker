@@ -4,9 +4,9 @@ import { Icon, Loading, ShellCtx } from './ui.jsx'
 import { initEngine, getEngine, subscribe } from './storage.js'
 import { DailyLog, AccountDay } from './daily.jsx'
 import { CalendarPage, SummaryPage, OffersPage, BonusesPage, WorkersPage } from './views.jsx'
-import { FilesPage, SettingsPage, MorePage, Welcome } from './tools.jsx'
-import { FamilyPage, useSyncStatus, syncLabel } from './family.jsx'
-import { startCloud } from './cloud.js'
+import { FilesPage, SettingsPage, MorePage } from './tools.jsx'
+import { FamilyPage, AuthGate, useSyncStatus, syncLabel } from './family.jsx'
+import { startCloud, cloudConfigured } from './cloud.js'
 
 const NAV = [
   ['daily', 'Daily Log', 'grid'], ['account', 'Account Day', 'clock'], ['calendar', 'Calendar', 'calendar'], ['summary', 'Month Summary', 'wallet'],
@@ -31,7 +31,8 @@ function MainApp({ dark, setDark }) {
   const needsWorkers = ['daily', 'account', 'calendar', 'summary', 'bonuses'].includes(page) && active.length === 0
   const meta = getEngine().meta()
   const days = meta.lastBackupAt ? Math.floor((Date.now() - Date.parse(meta.lastBackupAt)) / 864e5) : null
-  const screen = needsWorkers ? <Welcome /> : {
+  // a new family has nobody yet: start on Workers & Rates instead of an empty log
+  const screen = needsWorkers ? <WorkersPage onChange={reloadWorkers} /> : {
     daily: <DailyLog date={d} setDate={setDate} today={today} />,
     account: <AccountDay date={d} setDate={setDate} today={today} />,
     calendar: <CalendarPage month={m} setMonth={setMonth} today={today} openDay={(x) => { setDate(x); go('daily') }} />,
@@ -71,10 +72,13 @@ export default function App() {
   useEffect(() => { initEngine().then(() => { setReady(true); startCloud().catch(() => {}) }) }, [])
   const setDark = (v) => { setDarkState(v); try { localStorage.setItem('shiftly-theme', v ? 'dark' : 'light') } catch { /* ignore */ } }
   const show = (msg, kind = 'ok') => { setToast({ msg, kind }); clearTimeout(show.t); show.t = setTimeout(() => setToast(null), 4500) }
+  const sync = useSyncStatus()
+  // with family sync set up, the app opens on sign-in → join/create family, then the app itself
+  const gate = cloudConfigured && !sync.household_id && ['starting', 'signed-out', 'no-family'].includes(sync.state)
   return (
     <ToastCtx.Provider value={show}>
       <div className={dark ? 'app dark' : 'app'}>
-        {ready ? <MainApp dark={dark} setDark={setDark} /> : <Loading />}
+        {!ready || (gate && sync.state === 'starting') ? <Loading /> : gate ? <AuthGate status={sync} /> : <MainApp dark={dark} setDark={setDark} />}
         {toast && <div className={'toast ' + toast.kind} role="status"><span><Icon name={toast.kind === 'error' ? 'alert' : 'check'} size={16} /></span><div><strong>{toast.msg}</strong></div></div>}
       </div>
     </ToastCtx.Provider>

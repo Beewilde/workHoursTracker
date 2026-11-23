@@ -3,26 +3,6 @@ import { api, useLoad, useToast, $, h2, addMonths, fmtDate, monthLabel, download
 import { Page, Icon, Metric, Field, Loading, MonthNav, Avatar, useShell } from './ui.jsx'
 import { T } from './daily.jsx'
 
-export function Welcome() {
-  const { go } = useShell()
-  return (
-    <Page title="Welcome" eyebrow="Getting started">
-      <section className="overview-card">
-        <h2>Let’s set things up</h2>
-        <p className="muted-text" style={{ marginTop: 6 }}>Track hours, OT and review bonuses for everyone who shares the company account, then export the monthly Excel workbook.</p>
-        <ol className="welcome-list">
-          <li>Add the people who share the account in <b>Workers &amp; Rates</b>.</li>
-          <li>Pick this month’s rest days in <b>Settings</b>.</li>
-          <li>Log each day in the <b>Daily Log</b>.</li>
-          <li>At month end open <b>Month Summary</b> or <b>Import / Export</b> to get the Excel file.</li>
-        </ol>
-        <p className="muted-text">Everything is saved on this phone. To share with your family, turn on <b>Family sync</b> under More. Download a backup from <b>Import / Export</b> regularly.</p>
-        <div className="pill-row"><button className="primary-button" onClick={() => go('workers')}><Icon name="plus" size={17} /> Add workers</button><button className="outline-button" onClick={() => go('settings')}>Try sample data</button></div>
-      </section>
-    </Page>
-  )
-}
-
 export function FilesPage({ month, setMonth, workers, tab, setTab }) {
   const toast = useToast()
   const { data: sum } = useLoad(`/summary/${month}`)
