@@ -39,7 +39,7 @@ export const EMPTY = () => ({
   settings: {
     timezone: defaultTz(), default_review_bonus: 10, rd_default: [3, 4], reminder_days: 30,
     lunch_rule: 3, lunch_auto: true, lunch_minutes: 60, lunch_threshold: 8, lunch_from: null, lunch_inside: true, lunch_inside_from: null,
-    shift_start: '16:00', shift_end: '01:00', ot_rate: 8, ot_min: null,
+    shift_start: '16:00', shift_end: '01:00', ot_rate: 8, ot_min: null, php_rate: null, php_rate_date: null,
     presets: [{ label: 'Evening', time_in: '20:30', time_out: '01:00' }, { label: 'Early', time_in: '16:00', time_out: '20:30' }],
   },
 })
@@ -126,7 +126,7 @@ export function createEngine(state, save = () => {}) {
       account: S.accountDays[date] || { date, company_hours: null, lunch_hours: null, note: null, day_off: null },
       coverage: cov,
       offer: offer && { ...offer, stats: stats[offer.id], usedHours: entries.reduce((s, e) => s + (e.ot_hours || 0), 0), cap_today: capFor(offer, date) },
-      presets: S.settings.presets, lunchSettings: lunchCfg(month), shiftStart: sch.shift_start || '16:00',
+      presets: S.settings.presets, lunchSettings: lunchCfg(month), phpRate: S.settings.php_rate ?? null, shiftStart: sch.shift_start || '16:00',
     }
   }
 
@@ -280,6 +280,8 @@ export function createEngine(state, save = () => {}) {
     if ('ot_min' in b) S.settings.ot_min = num(b.ot_min, 'Monthly OT minimum', { nullable: true, max: 744 })
     if (b.lunch_inside != null) S.settings.lunch_inside = !!b.lunch_inside
     if ('lunch_inside_from' in b) { need(!b.lunch_inside_from || ISO.test(b.lunch_inside_from), 'Bad date'); S.settings.lunch_inside_from = b.lunch_inside_from || null }
+    if ('php_rate' in b) S.settings.php_rate = num(b.php_rate, 'Peso rate', { nullable: true, min: 1, max: 1000 })
+    if ('php_rate_date' in b) { need(!b.php_rate_date || ISO.test(b.php_rate_date), 'Bad date'); S.settings.php_rate_date = b.php_rate_date || null }
     if (Array.isArray(b.rd_default)) { need(b.rd_default.every((d) => Number.isInteger(d) && d >= 0 && d <= 6), 'Bad weekdays'); S.settings.rd_default = [...new Set(b.rd_default)].sort() }
     if (b.timezone) { try { new Intl.DateTimeFormat('en', { timeZone: b.timezone }) } catch { throw err(400, 'Unknown timezone') } S.settings.timezone = b.timezone }
     return commit(S.settings)
@@ -356,14 +358,15 @@ export function createEngine(state, save = () => {}) {
       const p = S.paid[`${month}|${w.id}`]
       const snap = p && typeof p === 'object' ? p : null
       return { worker: { id: w.id, name: w.name, color: w.color, active: w.active }, ...t, paidAt: paidAt(p),
-        paidTotal: snap ? snap.total : null, changedSincePaid: !!snap && Math.abs(snap.total - t.total) > 0.004 }
+        paidTotal: snap ? snap.total : null, changedSincePaid: !!snap && Math.abs(snap.total - t.total) > 0.004,
+        phpRate: snap?.php_rate ?? S.settings.php_rate ?? null }      // a paid month keeps the rate it was paid at
     })
     const sum = (k) => Math.round(rows.reduce((s, r) => s + r[k], 0) * 100) / 100
     return {
       // workdays (not a rest day, not leave, not in the future) with nobody logged as working
       month, rows, notLogged: missingDays(month).length, missingDays: missingDays(month),
       otMonth: monthStats[month] || { total: 0, min: Number(schedule(month).ot_min) || 0, qualified: !(Number(schedule(month).ot_min) > 0), final: today() > daysInMonth(month).at(-1), remaining: Number(schedule(month).ot_min) || 0 },
-      otRate: schedule(month).ot_rate,
+      otRate: schedule(month).ot_rate, phpRate: S.settings.php_rate ?? null, phpRateDate: S.settings.php_rate_date ?? null,
       totals: { regularHours: sum('regularHours'), otHours: sum('otHours'), regularPay: sum('regularPay'), otPay: sum('otPay'), bonusTotal: sum('bonusTotal'), total: sum('total') },
       offers: S.offers.filter((o) => o.start_date.slice(0, 7) <= month && o.end_date.slice(0, 7) >= month).map((o) => ({ ...o, stats: stats[o.id] })),
     }
@@ -382,7 +385,7 @@ export function createEngine(state, save = () => {}) {
       if (monthOT) throw err(409, `${month} is not over, so OT pay is still provisional (the monthly minimum is checked at month end).`)
       const r = report(month).report[wid]
       // keep what was paid, so later setting changes can be spotted instead of silently changing history
-      S.paid[`${month}|${wid}`] = { at: new Date().toISOString(), total: r.total, regularPay: r.regularPay, otPay: r.otPay, bonusTotal: r.bonusTotal, regularHours: r.regularHours, otHours: r.otHours }
+      S.paid[`${month}|${wid}`] = { at: new Date().toISOString(), php_rate: S.settings.php_rate ?? null, total: r.total, regularPay: r.regularPay, otPay: r.otPay, bonusTotal: r.bonusTotal, regularHours: r.regularHours, otHours: r.otHours }
     } else delete S.paid[`${month}|${wid}`]
     return commit({ ok: true })
   })
@@ -476,7 +479,8 @@ export function createEngine(state, save = () => {}) {
       return structuredClone({
         month, workers, rates: ratesBy(), entries: S.entries, offers: S.offers, bonuses: S.bonuses, today: today(),
         paid: Object.fromEntries(workers.filter((w) => S.paid[`${month}|${w.id}`]).map((w) => [w.id, paidAt(S.paid[`${month}|${w.id}`])])),
-        accountDays: S.accountDays, lunch: lunchCfg(month), months: Object.fromEntries([month].map((m) => [m, schedule(m)])),
+        accountDays: S.accountDays, lunch: lunchCfg(month), phpRate: S.settings.php_rate ?? null,
+        paidPhp: Object.fromEntries(workers.map((w) => [w.id, S.paid[`${month}|${w.id}`]?.php_rate ?? null])), months: Object.fromEntries([month].map((m) => [m, schedule(m)])),
       })
     },
     backup() {

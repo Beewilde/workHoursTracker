@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react'
-import { api, useLoad, useToast, $, h2, addMonths, fmtDate, monthLabel, downloadExport, downloadBackup, restoreBackup, eraseAll, loadDemo, storageInfo } from './lib.js'
+import { api, useLoad, useToast, $, peso, fetchPhpRate, h2, addMonths, fmtDate, monthLabel, downloadExport, downloadBackup, restoreBackup, eraseAll, loadDemo, storageInfo } from './lib.js'
 import { Page, Icon, Metric, Field, Loading, MonthNav, Avatar, useShell } from './ui.jsx'
 import { T } from './daily.jsx'
 
@@ -83,6 +83,7 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
   const [bonus, setBonus] = useState(null)
   const [lunch, setLunch] = useState(null)
   const [mon, setMon] = useState(null)
+  const [php, setPhp] = useState(null)
   if (!s || !sch || !meta) return <Page title="Settings" eyebrow="Preferences"><Loading /></Page>
   const P = presets || s.presets, B = bonus ?? s.default_review_bonus
   const LU = lunch || { auto: s.lunch_auto, minutes: s.lunch_minutes, threshold: s.lunch_threshold, from: s.lunch_from || '' }
@@ -143,6 +144,19 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
             <button className="primary-button small" onClick={() => put({ lunch_auto: LU.auto, lunch_minutes: LU.minutes, lunch_threshold: LU.threshold, lunch_from: LU.from || null }, 'Lunch rule saved').then(() => setLunch(null))}>Save lunch rule</button>
             {!s.lunch_inside && <button className="outline-button" onClick={() => { if (window.confirm('This recalculates EVERY saved day, including months already marked paid, so past totals will change. Download a backup first. Continue?')) put({ lunch_from: null }, 'Paid lunch now applies to all past days').then(() => setLunch(null)) }}>Apply to all past days</button>}
           </div>
+        </div>
+      </section>
+      <section className="settings-group">
+        <h2>Peso (PHP)</h2>
+        <div className="block">
+          <div className="form-grid" style={{ marginTop: 0 }}>
+            <Field label="$1 = ₱ (blank = don’t show pesos)"><input type="number" min="1" step="0.01" placeholder="e.g. 58.50" value={php ?? s.php_rate ?? ''} onChange={(e) => setPhp(e.target.value)} /></Field>
+            <div style={{ alignSelf: 'end' }} className="pill-row">
+              <button className="primary-button small" onClick={() => put({ php_rate: php ?? s.php_rate ?? '', php_rate_date: null }, 'Peso rate saved').then(() => setPhp(null))}>Save</button>
+              <button className="outline-button" onClick={() => fetchPhpRate().then(({ rate, date }) => put({ php_rate: Math.round(rate * 100) / 100, php_rate_date: date }, `Today’s rate: $1 = ₱${Math.round(rate * 100) / 100}`).then(() => setPhp(null))).catch(() => toast('Couldn’t get the rate (no internet?). Type it in instead.', 'error'))}>Get today’s rate</button>
+            </div>
+          </div>
+          <p className="muted-text" style={{ marginTop: 8 }}>{s.php_rate ? `Using $1 = ₱${s.php_rate}${s.php_rate_date ? ` (reference rate of ${s.php_rate_date})` : ' (typed in)'}. Example: $100 ≈ ${peso(100, s.php_rate)}. ` : ''}Pay is still worked out in dollars; pesos are shown next to it. “Get today’s rate” uses the daily reference rate, so type in the rate you actually got (GCash, bank, remittance) if it differs. A month marked paid keeps the rate it was paid at.</p>
         </div>
       </section>
       <section className="settings-group">

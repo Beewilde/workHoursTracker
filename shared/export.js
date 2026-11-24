@@ -134,9 +134,11 @@ export async function buildWorkbook(ctx, opts = {}) {
   if (sumWs) {
     sumWs.mergeCells('A1:I1')
     cell(sumWs, 'A1', `${monthTitle(month)} Invoice`, { bold: true, size: 14, align: 'left' })
-    ;['Worker','Days Worked','Total Hours','Regular Pay','OT Hours','OT Pay','Review Bonus','Grand Total','Status']
+    const PHP = '"₱"#,##0.00', rateOf = (w) => ctx.paidPhp?.[w.id] ?? ctx.phpRate
+    const peso = workers.some((w) => rateOf(w))
+    ;['Worker','Days Worked','Total Hours','Regular Pay','OT Hours','OT Pay','Review Bonus','Grand Total','Status', ...(peso ? ['$1 = ₱', 'Grand Total (PHP)'] : [])]
       .forEach((h, i) => cell(sumWs, L(i + 1) + 3, h, { bold: true, fill: COL.grey, box: true, wrap: true }))
-    ;[18, 13, 13, 15, 12, 14, 15, 16, 18].forEach((x, i) => (sumWs.getColumn(i + 1).width = x))
+    ;[18, 13, 13, 15, 12, 14, 15, 16, 18, 10, 18].forEach((x, i) => (sumWs.getColumn(i + 1).width = x))
     workers.forEach((w, i) => {
       const r = report[w.id], x = i + 4, S = q(w)
       const paidAt = ctx.paid?.[w.id]
@@ -149,6 +151,11 @@ export async function buildWorkbook(ctx, opts = {}) {
       cell(sumWs, 'G' + x, { formula: `${S}!C${s0 + 6}`, result: r.bonusTotal }, { box: true, fmt: CUR })
       cell(sumWs, 'H' + x, { formula: `${S}!K${t}`, result: r.total }, { box: true, fmt: CUR, bold: true })
       cell(sumWs, 'I' + x, paidAt ? `Paid on ${paidAt.slice(0, 10)}` : 'Unpaid', { box: true })
+      if (peso) {
+        const pr = rateOf(w)
+        cell(sumWs, 'J' + x, pr || null, { box: true, fmt: '0.00' })
+        cell(sumWs, 'K' + x, { formula: `IF(J${x}="","",ROUND(H${x}*J${x},2))`, result: pr ? r2(r.total * pr) : '' }, { box: true, fmt: PHP, bold: true })
+      }
     })
     const tr = workers.length + 4
     cell(sumWs, 'A' + tr, 'TOTAL', { bold: true, fill: COL.pink, box: true, align: 'left' })
@@ -156,6 +163,7 @@ export async function buildWorkbook(ctx, opts = {}) {
       const res = workers.reduce((s, w) => s + report[w.id][k], 0)
       cell(sumWs, c + tr, { formula: `SUM(${c}4:${c}${tr - 1})`, result: k.includes('Pay') || k === 'total' || k === 'bonusTotal' ? r2(res) : res }, { bold: true, fill: COL.pink, box: true, fmt })
     })
+    if (peso) cell(sumWs, 'K' + tr, { formula: `SUM(K4:K${tr - 1})`, result: r2(workers.reduce((s, w) => s + (rateOf(w) ? report[w.id].total * rateOf(w) : 0), 0)) }, { bold: true, fill: COL.pink, box: true, fmt: PHP })
     sumWs.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
     sumWs.eachRow({ includeEmpty: false }, (row) => row.eachCell((c) => { c.font = { name: 'Arial', size: 11, ...c.font } }))
   }

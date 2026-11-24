@@ -43,6 +43,14 @@ export function useLoad(url, { live = true } = {}) {
 }
 
 export const $ = (n) => '$' + (Number(n) || 0).toFixed(2)
+// pesos: '' when no USD→PHP rate is set, so callers can just append it
+export const peso = (usd, rate) => (Number(rate) > 0 ? '₱' + ((Number(usd) || 0) * Number(rate)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '')
+// today's USD→PHP rate from frankfurter.dev (free, no key; daily reference rate, not a bank's buy rate)
+export async function fetchPhpRate() {
+  const get = async (url, pick) => { const r = await fetch(url); if (!r.ok) throw new Error(); return pick(await r.json()) }
+  try { return await get('https://api.frankfurter.dev/v2/rate/USD/PHP', (d) => ({ rate: d.rate, date: d.date })) }
+  catch { return get('https://api.frankfurter.dev/v1/latest?base=USD&symbols=PHP', (d) => ({ rate: d.rates.PHP, date: d.date })) }
+}
 export const h2 = (n) => (Number(n) || 0).toFixed(2)
 export const t12 = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}` }
 const iso = (d) => d.toISOString().slice(0, 10)
