@@ -1,4 +1,4 @@
-// Family sync: Supabase sign-in, the family (household) this phone belongs to, and when to sync.
+// Organization: Supabase sign-in, the organization (household) this phone belongs to, and when to sync.
 // Without VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY the app still works, on this phone only.
 import { createClient } from '@supabase/supabase-js'
 import { createSync } from './sync.js'
@@ -45,7 +45,7 @@ function startSync(meta) {
 }
 
 // called once when the app opens (after the local data is loaded)
-// A phone that already belongs to a family always opens into the app, even with no signal
+// A phone that already belongs to a organization always opens into the app, even with no signal
 // (the saved login may need the network to refresh); it only asks to sign in again when it
 // is online and the login is really gone.
 export async function startCloud() {
@@ -73,19 +73,19 @@ export async function createAccount(email, password) { await signedIn(await auth
 export async function changePassword(password) { await auth(supabase.auth.updateUser({ password })) }
 export async function signOut() { stopSync(); saveMeta({}); await supabase.auth.signOut(); emit({ state: 'signed-out', household_id: null }) }
 
-// ── families ──
+// ── organizations ──
 export async function listFamilies() {
   const { data: { user } } = await supabase.auth.getUser()
   const rows = must(await supabase.from('household_members').select('role, households(id, name, invite_code)').eq('user_id', user.id))
   return rows.map((r) => ({ ...r.households, role: r.role }))
 }
-// first phone: this phone's existing data becomes the family's data
+// first phone: this phone's existing data becomes the organization's data
 export async function createFamily(name) {
   const id = must(await supabase.rpc('create_household', { p_name: name.trim(), p_timezone: getEngine().state.settings.timezone }))
   const meta = { household_id: id }; saveMeta(meta); startSync(meta)
   return id
 }
-// other phones: this phone's data is replaced by the family's
+// other phones: this phone's data is replaced by the organization's
 async function useFamily(id) {
   getEngine().reset()
   const meta = { household_id: id }; saveMeta(meta); startSync(meta)
@@ -95,7 +95,7 @@ export const openFamily = (id) => useFamily(id)
 export async function newInviteCode(id) { return must(await supabase.rpc('new_invite_code', { p_household: id })) }
 
 // after "Erase all" or "Restore backup": forget what was uploaded, so the next sync MERGES with
-// the family copy instead of deleting the family's records to match this phone
+// the organization copy instead of deleting the organization's records to match this phone
 export function forgetSyncedState() {
   const m = loadMeta()
   if (!m.household_id) return

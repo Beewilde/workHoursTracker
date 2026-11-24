@@ -24,7 +24,7 @@ export function downloadBackup() {
   const { filename, json } = getEngine().backup()
   return save(new Blob([json], { type: 'application/json' }), filename)
 }
-// with family sync on, these only change THIS phone: the next sync merges with the family copy
+// with organization sync on, these only change THIS phone: the next sync merges with the organization copy
 export const restoreBackup = async (text) => { const r = getEngine().restore(text); (await import('./cloud.js')).forgetSyncedState(); return r }
 export const eraseAll = async () => { getEngine().reset(); (await import('./cloud.js')).forgetSyncedState() }
 export const loadDemo = () => getEngine().loadDemo()
@@ -59,4 +59,4 @@ export const addMonths = (m, n) => { const [y, mm] = m.split('-').map(Number); r
 export const fmtDate = (s, o = { weekday: 'short', month: 'short', day: 'numeric' }) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', ...o })
 export const monthLabel = (m) => fmtDate(m + '-01', { month: 'long', year: 'numeric' })
 export const todayIn = (tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'Asia/Manila' }).format(new Date())
-export const STATUS = { worked: 'Worked', rd: 'Rest day', not_worked: 'Not worked', training: 'Training', not_logged: 'Not logged' }
+export const STATUS = { worked: 'Worked', rd: 'Rest day', not_worked: 'Not worked', training: 'Training', not_logged: 'Not logged', leave: 'Leave' }

@@ -9,7 +9,7 @@ const BOX = { top: thin, left: thin, bottom: thin, right: thin }
 const CUR = '"$"#,##0.00'
 const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } })
 const L = (n) => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26) } return s }
-const NOTE = { worked: 'Regular', training: 'Training', rd: 'RD', rdot: 'RDOT', not_worked: 'Regular', not_logged: 'Regular' }
+const NOTE = { worked: 'Regular', training: 'Training', rd: 'RD', rdot: 'RDOT', not_worked: 'Regular', not_logged: 'Regular', leave: 'Leave' }
 export const monthTitle = (month) => `${MONTH_NAMES[+month.slice(5) - 1]} ${month.slice(0, 4)}`
 export const exportName = (month) => `${MONTH_NAMES[+month.slice(5) - 1]} Invoice.xlsx`
 const sheetName = (w, m) => `${w.name} - ${MON[m - 1]}`.replace(/[[\]:*?/\\]/g, '').slice(0, 31)

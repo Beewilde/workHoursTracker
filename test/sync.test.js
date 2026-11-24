@@ -153,3 +153,18 @@ test('month settings, the account owner and leave days sync too', async () => {
   assert.equal(srv.db.schedules.length, 1)
   assert.ok(srv.requests - before < 40)                                                   // nothing re-uploaded
 })
+
+test('a month that only sets rest days pays the same on every phone (no empty shift time)', async () => {
+  const srv = fakeServer(); srv.addHousehold(HH)
+  const A = phone(srv), B = phone(srv)
+  A.state.settings.lunch_inside = true
+  const w = (await A.call('POST', '/workers', { name: 'Alex', rate: 5 })).id
+  A.state.schedules['2026-10'] = { weekdays: [3, 4] }                       // as older data / sample data has it
+  await A.call('PUT', '/schedule/2026-09', { ot_min: 15 })
+  await A.call('PUT', '/day/2026-10-05', { entries: [day(w, '16:00', '20:30', { ot_hours: 0 })] })
+  await A.run(); await B.run()
+  const tot = async (p) => (await p.call('GET', '/summary/2026-10')).totals.total
+  assert.equal(await tot(B), await tot(A))
+  assert.equal((await B.call('GET', '/schedule/2026-10')).ot_min, (await A.call('GET', '/schedule/2026-10')).ot_min)
+  assert.equal((await B.call('GET', '/schedule/2026-10')).shift_start, '16:00')
+})

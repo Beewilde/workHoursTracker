@@ -134,7 +134,8 @@ export function deriveOT(cov, position, hoursList) {
 //   • an OT offer (announcement) that has its OWN minimum → that offer's pool, its minimum and rate
 //   • otherwise → the MONTH's pool, with the minimum and OT rate set for that month
 // Minimum reached → every hour in the pool is paid the OT rate. Below it → each worker's regular rate
-// (or the offer's below_min_rate). Pay stays provisional until the offer / month is over.
+// (or the offer's below_min_rate). While the offer / month is still running, more OT may still be
+// offered, so OT is shown at the OT rate (provisional); the minimum is only applied once it is over.
 //   monthCfg(month) → { ot_min, ot_rate }   (null/0 minimum = no minimum)
 const lastDay = (month) => daysInMonth(month).at(-1)
 export const hasOwnMin = (o) => o && o.min_hours !== null && o.min_hours !== undefined && o.min_hours !== ''
@@ -158,6 +159,7 @@ export function evalOffers(offers, entries, ratesByWorker, today, monthCfg = () 
     list.sort((a, b) => a.date.localeCompare(b.date) || (toMin(a.ot_start) ?? 0) - (toMin(b.ot_start) ?? 0) || String(a.id).localeCompare(String(b.id)))
     const total = list.reduce((s, e) => s + e.ot_hours, 0)
     const qualified = total >= min - 1e-9
+    const payAsQualified = qualified || !final            // still running: assume the minimum will be reached
     let cum = 0
     for (const e of list) {
       const eo = byId.get(e.ot_offer_id)                 // an offer without its own minimum can still set the rate
@@ -165,9 +167,9 @@ export function evalOffers(offers, entries, ratesByWorker, today, monthCfg = () 
       const base = (isOffer ? o.below_min_rate : eo?.below_min_rate) ?? rateOn(ratesByWorker[e.worker_id], e.date)
       let pay
       if (isOffer && o.tier_mode === 'marginal') {
-        const under = Math.max(0, Math.min(e.ot_hours, min - cum))
+        const under = payAsQualified && !final ? 0 : Math.max(0, Math.min(e.ot_hours, min - cum))
         pay = under * base + (e.ot_hours - under) * otRate
-      } else pay = e.ot_hours * (qualified ? otRate : base)
+      } else pay = e.ot_hours * (payAsQualified ? otRate : base)
       cum += e.ot_hours
       byEntry[e.id] = { otPay: r2(pay), otRate: pay / e.ot_hours, provisional: !final, pool: key }
     }
@@ -184,6 +186,9 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
   const byDate = new Map()
   for (const e of entries) { if (!byDate.has(e.date)) byDate.set(e.date, []); byDate.get(e.date).push(e) }
   const planFor = (date) => lunch && lunchPlan(byDate.get(date) || [], { ...lunch, override: accountDays?.[date]?.lunch_hours, date })
+  // a scheduled rest day (or a leave day) with nothing logged counts as such without anyone saving it
+  const restDays = new Set(monthCfg(month)?.weekdays || [])
+  const virtual = (date) => (accountDays?.[date]?.day_off === 'leave' ? 'leave' : restDays.has(weekday(date)) ? 'rd' : 'not_logged')
   for (const w of workers) {
     const map = Object.fromEntries(entries.filter((e) => e.worker_id === w.id).map((e) => [e.date, e]))
     const rows = dates.map((date) => {
@@ -196,7 +201,7 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
       const rate = e?.rate_override ?? rateOn(rates[w.id], date)
       const ot = e && byEntry[e.id]
       return {
-        date, entryId: e?.id ?? null, status: e ? e.status : 'not_logged',
+        date, entryId: e?.id ?? null, status: e ? e.status : virtual(date),
         time_in: e?.time_in ?? null, time_out: e?.time_out ?? null,
         hours, elapsed, lunchMin, lunchShare, rate, pay: r2(hours * rate),
         ot_hours: e?.ot_hours || 0, ot_start: e?.ot_start ?? null, ot_end: e?.ot_end ?? null,

@@ -108,10 +108,10 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
             <Field label="Shift ends (lunch included)"><input type="time" value={M.shift_end} onChange={(e) => setMon({ ...M, shift_end: e.target.value })} /></Field>
           </div>
           <div className="form-grid">
-            <Field label="OT minimum this month (hours, blank = none)"><input type="number" min="0" step="0.5" value={M.ot_min} onChange={(e) => setMon({ ...M, ot_min: e.target.value })} /></Field>
+            <Field label="OT minimum this month (hours · 0 = none · blank = not known yet)"><input type="number" min="0" step="0.5" value={M.ot_min} onChange={(e) => setMon({ ...M, ot_min: e.target.value })} /></Field>
             <Field label="OT rate ($/h)"><input type="number" min="0" step="0.01" value={M.ot_rate} onChange={(e) => setMon({ ...M, ot_rate: e.target.value })} /></Field>
           </div>
-          <p className="muted-text" style={{ marginTop: 10 }}>The OT minimum counts everyone’s OT this month together (except OT under an offer that has its own minimum). Reached → every OT hour gets the OT rate; not reached → the regular rate. {sch.confirmed ? 'Saved for this month.' : 'Copied from the last month you set. Save to keep it for this month.'} The next month copies this one until you change it.</p>
+          <p className="muted-text" style={{ marginTop: 10 }}>The OT minimum counts everyone’s OT this month together (except OT under an offer that has its own minimum). Reached by month end → every OT hour gets the OT rate; not reached → the regular rate. Until the month ends, OT shows at the OT rate. The OT minimum starts blank every month, so enter what the company set; the month can’t be marked paid until it is filled in. {sch.confirmed ? 'Saved for this month.' : 'Shift time and rest days are copied from the last month you set. Save to keep them for this month.'}</p>
           <button className="primary-button small" style={{ marginTop: 10 }} onClick={saveMonth}>{sch.confirmed ? 'Save' : 'Confirm'} {monthLabel(month)}</button></div>
       </section>
       <section className="settings-group">
@@ -177,7 +177,7 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
           <div className="form-grid" style={{ marginTop: 12 }}><Field label="Remind me to back up every (days)"><input type="number" min="1" defaultValue={s.reminder_days} onBlur={(e) => put({ reminder_days: e.target.value })} /></Field></div></div>
         {!meta.hasData && <div className="block"><button className="outline-button" onClick={() => { try { loadDemo(); toast('Sample data loaded (October 2026)'); onChange() } catch (e) { toast(e.message, 'error') } }}>Load sample data</button></div>}
       </section>
-      <button className="logout-button" onClick={() => { if (window.confirm('Erase ALL data from this phone? Download a backup first if you might need it. With family sync on, the family copy is kept and comes back on the next sync.') && window.confirm('Really erase everything? This cannot be undone.')) { eraseAll().then(() => { toast('Everything erased from this phone'); setTimeout(() => location.reload(), 500) }) } }}><Icon name="trash" size={18} /> Erase all data</button>
+      <button className="logout-button" onClick={() => { if (window.confirm('Erase ALL data from this phone? Download a backup first if you might need it. With organization sync on, the organization copy is kept and comes back on the next sync.') && window.confirm('Really erase everything? This cannot be undone.')) { eraseAll().then(() => { toast('Everything erased from this phone'); setTimeout(() => location.reload(), 500) }) } }}><Icon name="trash" size={18} /> Erase all data</button>
     </Page>
   )
 }
@@ -185,7 +185,7 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
 export function MorePage({ dark, setDark }) {
   const { go } = useShell()
   const items = [['account', 'Account Day', 'clock', 'Divide company shifts'], ['ot', 'OT Offers', 'briefcase', 'Manage pooled overtime'], ['bonuses', 'Review Bonuses', 'gift', 'Track customer reviews'],
-    ['workers', 'Workers & Rates', 'users', 'Rates and team'], ['family', 'Family sync', 'users', 'Share records with your family'], ['files', 'Import / Export', 'file', 'Excel workbooks and backups'], ['settings', 'Settings', 'settings', 'Schedule and preferences']]
+    ['workers', 'Workers & Rates', 'users', 'Rates and team'], ['family', 'Organization', 'users', 'Share records with your organization'], ['files', 'Import / Export', 'file', 'Excel workbooks and backups'], ['settings', 'Settings', 'settings', 'Schedule and preferences']]
   return (
     <Page title="More" eyebrow="Tools">
       <section className="more-profile"><span className="avatar avatar-owner large">SH</span><div><h2>Shiftly</h2><p>Work &amp; payout</p></div></section>

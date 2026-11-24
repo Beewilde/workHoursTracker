@@ -37,7 +37,7 @@ export function CalendarPage({ month, setMonth, today, openDay }) {
               <div className="day-dots">
                 {data.workers.filter((w) => filter === 'all' || w.id === filter).map((w) => {
                   const s = data.days[d][w.id]
-                  if (s === 'not_logged') return null
+                  if (s === 'not_logged' || s === 'leave') return null
                   if (s === 'rd' || s === 'not_worked') return <i key={w.id} className="grey" />
                   if (s === 'training') return <i key={w.id} className="green" />
                   return <i key={w.id} style={{ background: w.color }} />
@@ -93,6 +93,7 @@ export function SummaryPage({ month, setMonth }) {
         <Metric label="Regular pay" value={$(t.regularPay)} /><Metric label="OT pay" value={$(t.otPay)} /><Metric label="Review bonuses" value={$(t.bonusTotal)} />
       </div>
       {data.notLogged > 0 && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>{data.notLogged} workday{data.notLogged === 1 ? '' : 's'} with nothing logged</strong><p>{data.missingDays.slice(0, 8).map((d) => fmtDate(d, { month: 'short', day: 'numeric' })).join(', ')}{data.missingDays.length > 8 ? '…' : ''}. Log who worked, or mark the day as leave.</p></div></div>}
+      {data.otMonth.total > 0 && !data.otMinSet && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Set this month’s OT minimum</strong><p>OT shows at {$(data.otRate)}/h for now. Enter the company’s minimum in Settings → {monthLabel(month)} (0 if there was none). The month can’t be marked paid until then.</p></div></div>}
       {(data.otMonth.total > 0 || data.otMonth.min > 0) && <OtPoolCard title={`${monthLabel(month)} OT (monthly minimum)`} st={data.otMonth} rate={data.otRate} />}
       <div className="section-heading"><div><h2>Worker payouts</h2><p>Review earnings and payment status.</p></div><button className="outline-button" onClick={() => setUnpaidOnly(!unpaidOnly)}>{unpaidOnly ? 'Show all' : 'Unpaid only'}</button></div>
       <div className="payout-table surface">
@@ -120,7 +121,9 @@ export function OtPoolCard({ title, st, rate }) {
   return (
     <section className="surface"><div className="section-heading" style={{ margin: 0 }}><div><p className="eyebrow">Pooled OT</p><h2>{title}</h2></div><span className="provisional">{st.final ? 'Final' : 'Provisional'}</span></div>
       <div className="mini-progress"><div><span>Everyone’s OT together</span><strong>{h2(st.total)}{st.min ? ` of ${st.min}h` : 'h'}</strong></div>{st.min > 0 && <div className="progress-track"><span style={{ width: Math.min(100, (st.total / st.min) * 100) + '%' }} /></div>}
-        <p>{!st.min ? `No minimum: OT is paid at ${$(rate)}/h.` : st.qualified ? `Minimum reached: every OT hour is paid ${$(rate)}/h.` : `${h2(st.remaining)}h more to reach the minimum. Until then OT is paid at the regular rate.`}</p></div></section>
+        <p>{!st.min ? `No minimum: OT is paid at ${$(rate)}/h.` : st.qualified ? `Minimum reached: every OT hour is paid ${$(rate)}/h.`
+          : st.final ? 'The minimum was not reached, so OT is paid at the regular rate.'
+          : `Shown at ${$(rate)}/h for now. ${h2(st.remaining)}h more is needed by the end; if it isn’t reached, all of this OT drops to the regular rate.`}</p></div></section>
   )
 }
 

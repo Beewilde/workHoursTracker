@@ -1,7 +1,7 @@
 // Saves the app's data on this device. Every change is written immediately to IndexedDB and mirrored
 // to localStorage (which is synchronous, so a change survives even if the app is closed right away).
 // In the installed app both live in the app's own private storage, not in a browser.
-// With family sync on (cloud.js) this copy is also uploaded to Supabase.
+// With organization sync on (cloud.js) this copy is also uploaded to Supabase.
 import { createEngine, EMPTY } from './engine.js'
 
 const DB = 'work-hours', STORE = 'kv'

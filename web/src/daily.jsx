@@ -142,7 +142,7 @@ export function DailyLog({ date, setDate, today }) {
   return (
     <>
       <Page title="Daily Log" eyebrow={eyebrow} narrow={false} className="daily-page">
-        {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the family updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
+        {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the organization updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
         <DayNav date={date} setDate={setDate} today={today} />
         <section className="overview-card">
           <div className="overview-title"><div><p className="eyebrow">Account shift · {T(day.shift.start)} – {T(day.shift.end)}</p><h2>{leave ? 'Leave · no work' : day.isRestDay ? 'Rest day' : 'Shift coverage'}</h2></div>
@@ -166,7 +166,9 @@ export function DailyLog({ date, setDate, today }) {
         {day.isRestDay && <div className="info-card"><Icon name="calendar" size={18} /><div><strong>Scheduled rest day</strong><p>Matches this month’s rest-day schedule{day.schedule.confirmed ? '' : ' (suggested from last month; confirm it in Settings)'}. If OT was offered, mark who did it as “RD OT”.</p></div></div>}
         {(day.offer || otH > 0) && (() => { const p = day.otPool, pct = p.min ? Math.min(100, ((p.total) / p.min) * 100) : 100; return (
           <div className="info-card"><Icon name="briefcase" size={18} /><div><strong>{p.kind === 'offer' ? `OT offer · ${p.name}` : `OT this month${day.offer ? ` · ${day.offer.name}` : ''}`}</strong>
-            <p>{!p.min ? `No minimum set: OT is paid at ${$(p.rate)}/h.` : p.qualified ? `Minimum reached (${h2(p.total)} of ${p.min}h, everyone together): every OT hour is paid ${$(p.rate)}/h.` : `${h2(p.total)} of ${p.min}h so far, everyone together. ${h2(p.remaining)}h more and every OT hour ${p.kind === 'offer' ? 'in this offer' : 'this month'} is paid ${$(p.rate)}/h; below it, the regular rate.`}{p.final ? '' : ' Provisional until the ' + (p.kind === 'offer' ? 'offer ends.' : 'month ends.')}</p>
+            <p>{p.kind === 'month' && !p.minSet ? `This month’s OT minimum isn’t set yet, so OT shows at ${$(p.rate)}/h. Set it in Settings once the company says it (0 if none).` : !p.min ? `No minimum: OT is paid at ${$(p.rate)}/h.` : p.qualified ? `Minimum reached (${h2(p.total)} of ${p.min}h, everyone together): every OT hour is paid ${$(p.rate)}/h.`
+              : p.final ? `Only ${h2(p.total)} of ${p.min}h was reached, so OT ${p.kind === 'offer' ? 'in this offer' : 'this month'} is paid at the regular rate.`
+              : `${h2(p.total)} of ${p.min}h so far, everyone together. Shown at ${$(p.rate)}/h for now; if ${h2(p.remaining)}h more isn’t reached by the end of the ${p.kind === 'offer' ? 'offer' : 'month'}, all of it drops to the regular rate.`}</p>
             {p.min > 0 && <div className="progress-track" style={{ marginTop: 8 }}><span style={{ width: pct + '%' }} /></div>}
             {day.offer && day.offer.cap_today != null && <div className="form-grid" style={{ marginTop: 10, maxWidth: 260 }}><Field label="OT available today (hours)"><input type="number" min="0.25" step="0.25" key={date + ':' + day.offer.cap_today} defaultValue={day.offer.cap_today} onBlur={(e) => e.target.value !== String(day.offer.cap_today) && saveCap(e.target.value)} /></Field></div>}</div></div>) })()}
         {!leave && plan.inside && plan.poolMin > 0 && (
@@ -296,9 +298,10 @@ export function AccountDay({ date, setDate, today }) {
   const otTotal = otRows.reduce((s, r) => s + Number(r.f.ot_hours), 0)
   const ot = day.offer && otTotal > 0 ? deriveOT(cov, form.ot_position, [otTotal])[0] : null
   const ch = form.account.company_hours === '' ? null : Number(form.account.company_hours)
-  // a gap that fits inside the paid lunch is the lunch break itself, not a hole in the coverage
-  const lunchGap = cov.status === 'gap' && cov.gap <= plan.poolMin + 0.5
-  const validation = cov.status === 'empty' ? ['empty', 'No shifts yet'] : cov.status === 'ok' ? ['ok', 'Full coverage'] : cov.status === 'gap' ? (lunchGap ? ['ok', `Lunch break ${Math.round(cov.gap)}m`] : ['gap', `${Math.round(cov.gap - plan.poolMin)}m uncovered`]) : ['overlap', `${cov.overlap}m overlap`]
+  // a gap that fits the part of the lunch NOT already inside the times is the lunch break itself
+  const lunchFree = plan.poolMin - (plan.insideMin || 0)
+  const lunchGap = cov.status === 'gap' && cov.gap <= lunchFree + 0.5
+  const validation = cov.status === 'empty' ? ['empty', 'No shifts yet'] : cov.status === 'ok' ? ['ok', 'Full coverage'] : cov.status === 'gap' ? (lunchGap ? ['ok', `Lunch break ${Math.round(cov.gap)}m`] : ['gap', `${Math.round(cov.gap - lunchFree)}m uncovered`]) : ['overlap', `${cov.overlap}m overlap`]
   const addBlock = (w) => {
     const start = cov.start != null ? fmtMin(cov.end) : day.presets[0]?.time_in || '16:00'
     const end = cov.start != null ? fmtMin(cov.end + 270) : day.presets[0]?.time_out || '20:30'
@@ -306,7 +309,7 @@ export function AccountDay({ date, setDate, today }) {
   }
   return (
     <Page title="Account Day" eyebrow={eyebrow}>
-      {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the family updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
+      {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the organization updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
       <DayNav date={date} setDate={setDate} today={today} />
       <section className="surface account-shift">
         <div className="section-heading" style={{ marginTop: 0 }}>
@@ -314,7 +317,7 @@ export function AccountDay({ date, setDate, today }) {
         </div>
         <div className="account-stats">
           <Metric label="Worked" value={cov.hours ? hm(cov.hours) : '—'} />
-          <Metric label="Paid lunch added" value={plan.totalMin > 0 ? hm(plan.totalMin / 60) : 'None'} />
+          <Metric label="Paid lunch" value={plan.poolMin > 0 ? hm(plan.poolMin / 60) : 'None'} />
           <Metric label="Paid hours" value={cov.hours ? hm(timedRows.reduce((s, r) => s + paidHours(r.f, plan), 0)) : '—'} />
         </div>
         <div className="form-grid three">
@@ -322,7 +325,7 @@ export function AccountDay({ date, setDate, today }) {
           <Field label="Paid lunch to add (hours)"><input type="number" min="0" step="0.25" placeholder={autoPlan.totalMin > 0 ? `auto: ${Math.round(autoPlan.totalMin) / 60}` : 'auto: none'} value={form.account.lunch_hours} onChange={(e) => setForm({ ...form, account: { ...form.account, lunch_hours: e.target.value } })} /></Field>
           <Field label="Note"><input value={form.account.note} onChange={(e) => setForm({ ...form, account: { ...form.account, note: e.target.value } })} /></Field>
         </div>
-        {ch != null && cov.hours > 0 && Math.abs(ch - (cov.hours + plan.totalMin / 60)) > 0.01 && <div className="alert-banner compact" style={{ marginBottom: 0 }}><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Hours don’t match</strong><p>Workers’ paid time (worked + lunch) is {hm(cov.hours + plan.totalMin / 60)}, but the company shows {hm(ch)}. Informational only; pay is not affected.</p></div></div>}
+        {ch != null && cov.hours > 0 && Math.abs(ch - (cov.hours + lunchFree / 60)) > 0.01 && <div className="alert-banner compact" style={{ marginBottom: 0 }}><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Hours don’t match</strong><p>Workers’ paid time (worked + lunch) is {hm(cov.hours + lunchFree / 60)}, but the company shows {hm(ch)}. Informational only; pay is not affected.</p></div></div>}
       </section>
 
       <section className="surface timeline-card">
