@@ -210,3 +210,30 @@ test('a month with OT can only be marked paid once its OT minimum is entered (0 
   await call('PUT', '/schedule/2026-11', { ot_min: '' })                             // blank stays "not known yet"
   assert.equal((await call('GET', '/schedule/2026-11')).otMinSet, false)
 })
+
+test('member rules: log new days, but saved logs and management are the owner\'s', async () => {
+  const { e, call, id } = await setup()
+  await call('PUT', '/day/2026-11-02', { entries: [w(id.Me, '16:00', '20:30'), w(id.Sib, '20:30', '01:00')] })    // owner logged this
+  e.setRole('editor')
+  // a new day: fine
+  await call('PUT', '/day/2026-11-03', { entries: [w(id.Me, '16:00', '01:00')] })
+  // re-saving a saved day unchanged, plus adding someone new to it: fine
+  const d2 = await call('GET', '/day/2026-11-02')
+  await call('PUT', '/day/2026-11-02', { entries: [...d2.workers.filter((x) => x.entry).map((x) => ({ worker_id: x.id, ...x.entry })), { worker_id: id.Ate, status: 'not_worked', lunch_min: 0 }] })
+  // changing or removing a saved log: refused
+  await assert.rejects(call('PUT', '/day/2026-11-02', { entries: [w(id.Me, '16:00', '21:00'), w(id.Sib, '21:00', '01:00')] }), /Only the owner can change it/)
+  await assert.rejects(call('PUT', '/day/2026-11-03', { entries: [] }), /can only be removed by the owner/)
+  await assert.rejects(call('PUT', '/day/2026-11-03', { entries: [w(id.Me, '16:00', '01:00', { remark: 'x' })] }), /Only the owner/)
+  // bonuses and Account Day notes: fine
+  await call('POST', '/bonuses', { worker_id: id.Ate, review_date: '2026-11-05', amount: 10 })
+  const d3 = await call('GET', '/day/2026-11-03')
+  await call('PUT', '/day/2026-11-03', { entries: d3.workers.filter((x) => x.entry).map((x) => ({ worker_id: x.id, ...x.entry })), account: { note: 'outlook down' } })
+  // management: refused
+  for (const [m, u, b] of [['PUT', '/settings', { php_rate: 58 }], ['PUT', '/schedule/2026-11', { weekdays: [2, 3] }], ['POST', '/workers', { name: 'X', rate: 5 }],
+    ['POST', `/workers/${id.Me}/rates`, { effective_from: '2026-12-01', rate: 6 }], ['POST', '/offers', { name: 'o', start_date: '2026-11-20', end_date: '2026-11-21', qualified_rate: 8 }],
+    ['PUT', `/paid/2026-10/${id.Me}`, { paid: true }]]) await assert.rejects(call(m, u, b), /Only the organization owner/)
+  // the owner can do all of it
+  e.setRole('owner')
+  await call('PUT', '/day/2026-11-02', { entries: [w(id.Me, '16:00', '21:00'), w(id.Sib, '21:00', '01:00')] })
+  await call('PUT', '/schedule/2026-11', { weekdays: [2, 3] })
+})

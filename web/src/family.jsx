@@ -5,6 +5,9 @@ import { Page, Icon, Field, Loading } from './ui.jsx'
 import { cloudConfigured, onSyncStatus, syncStatus, signIn, createAccount, changePassword, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, listMembers, removeMember, syncNow } from './cloud.js'
 import { getEngine } from './storage.js'
 
+// can this phone change the organization's settings, workers, paid months and saved logs?
+// (not in an organization = it's all yours)
+export const canManage = (s) => !s.household_id || s.role == null || s.role === 'owner'
 export const useSyncStatus = () => {
   const [s, set] = useState(() => syncStatus())
   useEffect(() => onSyncStatus(set), [])
@@ -73,7 +76,7 @@ function ChooseFamily({ status }) {
     <>
       {fams.length > 0 && <Section title="Your organization">
         {fams.map((f) => <div key={f.id} className="pill-row" style={{ alignItems: 'center' }}><strong style={{ flex: 1 }}>{f.name}</strong>
-          <button className="primary-button small" disabled={busy} onClick={run(async () => { if (okToReplace()) await openFamily(f.id) })}>Open</button></div>)}
+          <button className="primary-button small" disabled={busy} onClick={run(async () => { if (okToReplace()) await openFamily(f.id, f.role) })}>Open</button></div>)}
       </Section>}
       <Section title="Join your organization">
         <p className="muted-text">Enter the invite code from whoever set up the organization (it’s on their Organization screen).</p>

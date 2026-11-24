@@ -16,7 +16,7 @@ export function fakeServer() {
 
   class Q {
     constructor(t) { this.t = t; this.filters = []; this.op = 'select'; this.rangeV = null; this.ord = null }
-    select() { return this }
+    select() { return this }        // after delete/update: return the affected rows (op is unchanged)
     eq(c, v) { this.filters.push((r) => String(r[c]) === String(v)); return this }
     gt(c, v) { this.filters.push((r) => r[c] > v); return this }
     order(c) { this.ord = c; return this }
@@ -39,7 +39,11 @@ export function fakeServer() {
         // like Postgres: ON CONFLICT must name exactly a unique key of the table
         if (this.onConflict && [...this.onConflict.split(',')].sort().join() !== [...pk(this.t)].sort().join())
           return { data: null, error: { code: '42P10', message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification' } }
-        for (const r of this.rows) { const msg = srv.refuse?.(this.t, r); if (msg) return { data: null, error: { code: 'P0409', message: msg } } }
+        for (const r of this.rows) {
+          const exists = tbl.some((x) => pk(this.t).every((k) => String(x[k]) === String(r[k])))
+          const msg = srv.refuse?.(this.t, r, exists ? 'update' : 'insert')
+          if (msg) return { data: null, error: typeof msg === 'object' ? msg : { code: 'P0409', message: msg } }
+        }
         for (const r of this.rows) {
           const i = tbl.findIndex((x) => pk(this.t).every((k) => String(x[k]) === String(r[k])))
           const row = { ...(i >= 0 ? tbl[i] : {}), ...structuredClone(r), updated_at: tick() }
@@ -50,16 +54,15 @@ export function fakeServer() {
         return { data: null, error: null }
       }
       if (this.op === 'update') {
-        for (const r of tbl.filter((x) => this.match(x))) Object.assign(r, structuredClone(this.val), { updated_at: tick() })
-        return { data: null, error: null }
+        const hit = tbl.filter((x) => this.match(x) && !srv.refuse?.(this.t, x, 'update'))   // RLS: refused rows are just not updated
+        for (const r of hit) Object.assign(r, structuredClone(this.val), { updated_at: tick() })
+        return { data: hit.map((r) => structuredClone(r)), error: null }
       }
       if (this.op === 'delete') {
-        for (const r of tbl.filter((x) => this.match(x))) { const msg = srv.refuse?.(this.t, r, 'delete'); if (msg) return { data: null, error: { message: msg } } }
-        for (const r of tbl.filter((x) => this.match(x))) {
-          db.tombstones.push({ household_id: r.household_id, tbl: this.t, key: keyStr(this.t, r), deleted_at: tick() })
-        }
-        db[this.t] = tbl.filter((x) => !this.match(x))
-        return { data: null, error: null }
+        const hit = tbl.filter((x) => this.match(x) && !srv.refuse?.(this.t, x, 'delete'))   // RLS: refused rows are just not deleted
+        for (const r of hit) db.tombstones.push({ household_id: r.household_id, tbl: this.t, key: keyStr(this.t, r), deleted_at: tick() })
+        db[this.t] = tbl.filter((x) => !hit.includes(x))
+        return { data: hit.map((r) => structuredClone(r)), error: null }
       }
     }
   }

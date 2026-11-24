@@ -47,6 +47,14 @@ export const EMPTY = () => ({
 export function createEngine(state, save = () => {}) {
   const S = state
   const err = (status, message, extra) => Object.assign(new Error(message), { status, data: { error: message, ...extra } })
+  // Role in the organization (set by cloud.js). null = not in an organization: this phone decides everything.
+  // Members can log NEW days and handle bonuses / Account Day info; everything else is the owner's.
+  let role = null
+  const isOwner = () => role == null || role === 'owner'
+  const ownerOnly = () => { if (!isOwner()) throw err(403, 'Only the organization owner can do this.') }
+  const sameLog = (a, b) => a.status === b.status && (a.time_in || null) === (b.time_in || null) && (a.time_out || null) === (b.time_out || null)
+    && (Number(a.ot_hours) || 0) === (Number(b.ot_hours) || 0) && (a.lunch_min ?? null) === (b.lunch_min ?? null)
+    && (a.rate_override ?? null) === (b.rate_override ?? null) && (a.remark || null) === (b.remark || null)
   const need = (c, m) => { if (!c) throw err(400, m) }
   const num = (v, name, { min = 0, max = 1e6, nullable = false } = {}) => {
     if ((v === null || v === undefined || v === '') && nullable) return null
@@ -167,7 +175,17 @@ export function createEngine(state, save = () => {}) {
         const same = cur && cur.status === e.status && (cur.time_in || null) === (e.time_in || null) && (cur.time_out || null) === (e.time_out || null) && (cur.ot_hours || 0) === e.ot_hours && (cur.lunch_min ?? null) === (e.lunch_min ?? null)
         if (!same) throw err(409, `${w.name}'s ${month} is marked paid and locked. Unmark it as paid to edit.`)
         e.__skip = true
+      } else if (!isOwner()) {
+        const cur = existing.find((x) => x.worker_id === w.id)
+        if (cur) {
+          if (!sameLog(cur, e)) throw err(403, `${w.name}'s log for this day is already saved. Only the owner can change it.`)
+          e.__skip = true                                  // unchanged saved log: leave it exactly as it is
+        }
       }
+    }
+    if (!isOwner()) {
+      const removed = existing.filter((x) => !seen.has(x.worker_id) && !keep(x))
+      if (removed.length) throw err(403, `${removed.map((x) => wmap.get(x.worker_id)?.name).join(', ')}: a saved log can only be removed by the owner.`)
     }
     // locked workers that are not in the payload still count for coverage and the OT cap
     const covInput = [...input, ...existing.filter((x) => keep(x) && !seen.has(x.worker_id)).map((x) => ({ ...x, __skip: true }))]
@@ -268,6 +286,7 @@ export function createEngine(state, save = () => {}) {
 
   on('GET', '/settings', () => S.settings)
   on('PUT', '/settings', ({ body: b }) => {
+    ownerOnly()
     if (b.presets) {
       need(Array.isArray(b.presets) && b.presets.length <= 12, 'Invalid presets')
       for (const p of b.presets) need(p.label && toMin(p.time_in) != null && toMin(p.time_out) != null, 'Each preset needs a label and two times')
@@ -294,6 +313,7 @@ export function createEngine(state, save = () => {}) {
   on('GET', '/schedule/:m', ({ params: [m] }) => { need(MONTH.test(m), 'Bad month'); return schedule(m) })
   // save a month's settings (anything not sent keeps its current/suggested value)
   on('PUT', '/schedule/:m', ({ params: [m], body }) => {
+    ownerOnly()
     need(MONTH.test(m), 'Bad month')
     const cur = schedule(m), next = { weekdays: cur.weekdays, shift_start: cur.shift_start, shift_end: cur.shift_end, ot_min: cur.ot_min, ot_rate: cur.ot_rate }
     if (body.weekdays !== undefined) {
@@ -313,6 +333,7 @@ export function createEngine(state, save = () => {}) {
 
   on('GET', '/workers', () => S.workers.map(workerView))
   on('POST', '/workers', ({ body }) => {
+    ownerOnly()
     const name = String(body.name || '').trim()
     need(name && name.length <= 40, 'Enter a worker name')
     const rate = num(body.rate, 'Hourly rate'), from = body.effective_from || '2000-01-01'
@@ -323,6 +344,7 @@ export function createEngine(state, save = () => {}) {
     return commit(workerView(w))
   })
   on('POST', '/workers/:id/rates', ({ params: [id], body }) => {
+    ownerOnly()
     const w = S.workers.find((x) => x.id === id)
     need(w, 'Unknown worker'); need(ISO.test(body.effective_from || ''), 'Bad date')
     const hit = paidMonths(w.id).filter((m) => m >= body.effective_from.slice(0, 7))
@@ -333,12 +355,14 @@ export function createEngine(state, save = () => {}) {
   })
   // the account owner (e.g. the sister whose job it is): default receiver of review bonuses and of the lunch when she takes it
   on('POST', '/workers/:id/owner', ({ params: [id], body }) => {
+    ownerOnly()
     const w = S.workers.find((x) => x.id === id)
     need(w, 'Unknown worker')
     for (const x of S.workers) x.owner = body.owner ? x.id === id : x.owner && x.id !== id
     return commit(workerView(w))
   })
   on('POST', '/workers/:id/active', ({ params: [id], body }) => {
+    ownerOnly()
     const w = S.workers.find((x) => x.id === id)
     need(w, 'Unknown worker'); w.active = !!body.active
     return commit(workerView(w))
@@ -382,6 +406,7 @@ export function createEngine(state, save = () => {}) {
       && !S.entries.some((e) => e.date === d && (e.status === 'worked' || e.status === 'training')))
   }
   on('PUT', '/paid/:m/:w', ({ params: [month, wid], body }) => {
+    ownerOnly()
     need(MONTH.test(month) && S.workers.some((w) => w.id === wid), 'Bad request')
     if (body.paid) {
       const open = S.offers.find((o) => o.start_date.slice(0, 7) <= month && o.end_date.slice(0, 7) >= month && o.end_date >= today() && S.entries.some((e) => e.ot_offer_id === o.id && e.worker_id === wid && e.date.startsWith(month)))
@@ -398,8 +423,9 @@ export function createEngine(state, save = () => {}) {
   })
 
   on('GET', '/offers', () => offersView())
-  on('POST', '/offers', ({ body }) => { const { o, warnings } = offerBody(body); const row = { id: newId(), ...o, day_caps: {} }; S.offers.push(row); return commit({ id: row.id, warnings }) })
+  on('POST', '/offers', ({ body }) => { ownerOnly(); const { o, warnings } = offerBody(body); const row = { id: newId(), ...o, day_caps: {} }; S.offers.push(row); return commit({ id: row.id, warnings }) })
   on('PUT', '/offers/:id', ({ params: [id], body }) => {
+    ownerOnly()
     const i = S.offers.findIndex((o) => o.id === id)
     need(i >= 0, 'Not found')
     const { o, warnings } = offerBody(body, id)
@@ -412,6 +438,7 @@ export function createEngine(state, save = () => {}) {
     return commit({ id, warnings })
   })
   on('PUT', '/offers/:id/day-cap', ({ params: [id], body }) => {
+    ownerOnly()
     const o = S.offers.find((x) => x.id === id)
     need(o, 'Not found'); need(ISO.test(body.date || '') && body.date >= o.start_date && body.date <= o.end_date, 'That date is outside the offer')
     o.day_caps ||= {}
@@ -420,6 +447,7 @@ export function createEngine(state, save = () => {}) {
     return commit({ ok: true })
   })
   on('DELETE', '/offers/:id', ({ params: [id] }) => {
+    ownerOnly()
     if (S.entries.some((e) => e.ot_offer_id === id && e.ot_hours > 0)) throw err(409, 'This offer already has OT entries and cannot be deleted')
     S.offers = S.offers.filter((o) => o.id !== id)
     return commit({ ok: true })
@@ -471,6 +499,8 @@ export function createEngine(state, save = () => {}) {
 
   return {
     state: S,
+    setRole(r) { role = r || null },
+    role: () => role,
     async handle(method, url, body) {
       const [path, qs] = url.split('?'), query = Object.fromEntries(new URLSearchParams(qs || ''))
       for (const [m, re, h] of routes) {

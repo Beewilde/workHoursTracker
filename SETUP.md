@@ -85,6 +85,18 @@ npm run ios            # opens Xcode
 - **Pesos:** Settings → Peso (PHP). Type the rate you got, or tap **Get today's rate** (the daily reference rate from frankfurter.dev). Pay is still worked out in dollars; pesos are shown next to it in the Daily Log, the Month Summary and the Excel Summary sheet. A month marked paid keeps the rate it was paid at.
 - **Older records** (before this version) keep the old rule, where the lunch was added on top of the times, so their totals don't change.
 
+## Owner and members
+
+| | Owner (created the organization) | Members (joined with the code) |
+|---|---|---|
+| Log a **new** day | ✅ | ✅ |
+| Change or delete a **saved** day log | ✅ | ❌ locked as soon as it's saved |
+| Review bonuses, Account Day info (leave, company hours, notes) | ✅ | ✅ |
+| Mark paid, workers & rates, month settings, OT offers, shared settings (peso, lunch, presets) | ✅ | ❌ view only |
+| See members; make a new invite code; remove a member | see ✅ / ✅ / ✅ | see ✅ / ❌ / ❌ |
+
+The database enforces this (`0006_member_limits.sql`), so it holds even if someone uses an old version of the app.
+
 ## How sync behaves (so nothing surprises you)
 
 - Every phone saves first, then uploads a few seconds later. Other phones pick changes up every minute, when the app is opened, or when they get signal back.

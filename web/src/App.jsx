@@ -5,7 +5,7 @@ import { initEngine, getEngine, subscribe } from './storage.js'
 import { DailyLog, AccountDay } from './daily.jsx'
 import { CalendarPage, SummaryPage, OffersPage, BonusesPage, WorkersPage } from './views.jsx'
 import { FilesPage, SettingsPage, MorePage } from './tools.jsx'
-import { FamilyPage, AuthGate, useSyncStatus, syncLabel } from './family.jsx'
+import { FamilyPage, AuthGate, useSyncStatus, syncLabel, canManage } from './family.jsx'
 import { startCloud, cloudConfigured } from './cloud.js'
 
 const NAV = [
@@ -29,6 +29,9 @@ function MainApp({ dark, setDark }) {
   const active = workers.filter((w) => w.active)
   const go = (p, tab) => { setPage(p); if (tab) setFilesTab(tab); window.scrollTo(0, 0) }
   const needsWorkers = ['daily', 'account', 'calendar', 'summary', 'bonuses'].includes(page) && active.length === 0
+  // stay on Workers & Rates while adding the first few people (instead of jumping away after the first)
+  // (the owner only: a member who just joined has no workers for a moment while the first download arrives)
+  if (needsWorkers && page === 'daily' && canManage(sync)) { setPage('workers'); return null }
   const meta = getEngine().meta()
   const days = meta.lastBackupAt ? Math.floor((Date.now() - Date.parse(meta.lastBackupAt)) / 864e5) : null
   // a new organization has nobody yet: start on Workers & Rates instead of an empty log
