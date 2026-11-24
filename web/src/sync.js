@@ -19,8 +19,9 @@ export const TABLES = {
   ot_offers:    { key: ['id'], cols: ['id', 'name', 'start_date', 'end_date', 'cap_hours', 'min_hours', 'qualified_rate', 'below_min_rate', 'tier_mode', 'day_caps', 'notes'] },
   entries:      { key: ['worker_id', 'date'], cols: ['id', 'worker_id', 'date', ...ENTRY_COLS] },
   bonuses:      { key: ['id'], cols: ['id', 'worker_id', 'review_date', 'pay_month', 'reference', 'note', 'chat_time', 'amount'] },
-  account_days: { key: ['date'], cols: ['date', 'company_hours', 'lunch_hours', 'note', 'day_off'] },
-  schedules:    { key: ['month'], cols: ['month', 'weekdays', 'shift_start', 'shift_end', 'ot_min', 'ot_rate'] },   // month settings
+  // these two are keyed per organization in the database: (household_id, date) / (household_id, month)
+  account_days: { key: ['date'], conflict: 'household_id,date', cols: ['date', 'company_hours', 'lunch_hours', 'note', 'day_off'] },
+  schedules:    { key: ['month'], conflict: 'household_id,month', cols: ['month', 'weekdays', 'shift_start', 'shift_end', 'ot_min', 'ot_rate'] },   // month settings
   payouts:      { key: ['month', 'worker_id'], cols: ['worker_id', 'month', 'total', 'snapshot', 'paid_at'] },
 }
 const NAMES = Object.keys(TABLES)
@@ -28,6 +29,12 @@ const TIME_COLS = new Set(['time_in', 'time_out', 'ot_start', 'ot_end', 'chat_ti
 const NUM_COLS = new Set(['rate', 'cap_hours', 'min_hours', 'qualified_rate', 'below_min_rate', 'lunch_min', 'ot_hours', 'rate_override', 'amount', 'company_hours', 'lunch_hours', 'total', 'ot_min', 'ot_rate'])
 const LOCAL_ONLY_SETTINGS = []          // every setting is shared by the organization
 
+const conflictOf = (t) => TABLES[t].conflict || TABLES[t].key.join(',')
+// Only a deliberate refusal by the database (paid-month lock, a rule the row breaks, no permission)
+// makes this phone take the server's version. Any other error (network, a bug) keeps the change
+// waiting here, so nothing typed on the phone is ever thrown away by a failed upload.
+const REFUSED = new Set(['P0409', '23514', '23505', '23503', '23P01', '23502', '42501'])
+const refused = (err) => REFUSED.has(err?.code) || /marked paid|already paid|row-level security/i.test(err?.message || '')
 const keyOf = (t, r) => TABLES[t].key.map((k) => String(r[k])).join('|')
 const sortKeys = (v) => Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v
 // one canonical shape for a row, whether it came from this phone or from Postgres
@@ -171,6 +178,7 @@ export function createSync({ client, getState, persist, meta, saveMeta, now = ()
     const dels = Object.fromEntries(NAMES.map((t) => [t, Object.keys(meta.base[t]).filter((k) => !local[t].has(k))]))
     const revert = async (t, k, err) => {
       rejected.push({ table: t, key: k, message: err.message })
+      if (!refused(err)) return                       // not a refusal: keep the change and try again next sync
       const srv = await fetchRow(t, k)
       applyRow(S, t, k, srv && normalize(t, srv))
       if (srv) meta.base[t][k] = fp(t, srv); else delete meta.base[t][k]
@@ -190,11 +198,11 @@ export function createSync({ client, getState, persist, meta, saveMeta, now = ()
     for (const t of NAMES) {
       if (!ups[t].length) continue
       const body = ups[t].map(([, r]) => ({ ...r, household_id: hh() }))
-      const { error } = await q(t).upsert(body, { onConflict: TABLES[t].key.join(',') })
+      const { error } = await q(t).upsert(body, { onConflict: conflictOf(t) })
       if (!error) { ups[t].forEach(([k, r]) => (meta.base[t][k] = JSON.stringify(r))); continue }
       // one bad row fails the whole batch: retry one by one to find it
       for (const [k, r] of ups[t]) {
-        const one = await q(t).upsert([{ ...r, household_id: hh() }], { onConflict: TABLES[t].key.join(',') })
+        const one = await q(t).upsert([{ ...r, household_id: hh() }], { onConflict: conflictOf(t) })
         if (one.error) await revert(t, k, one.error); else meta.base[t][k] = JSON.stringify(r)
       }
     }
