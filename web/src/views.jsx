@@ -120,7 +120,9 @@ export function OtPoolCard({ title, st, rate }) {
   return (
     <section className="surface"><div className="section-heading" style={{ margin: 0 }}><div><p className="eyebrow">Pooled OT</p><h2>{title}</h2></div><span className="provisional">{st.final ? 'Final' : 'Provisional'}</span></div>
       <div className="mini-progress"><div><span>Everyone’s OT together</span><strong>{h2(st.total)}{st.min ? ` of ${st.min}h` : 'h'}</strong></div>{st.min > 0 && <div className="progress-track"><span style={{ width: Math.min(100, (st.total / st.min) * 100) + '%' }} /></div>}
-        <p>{!st.min ? `No minimum: OT is paid at ${$(rate)}/h.` : st.qualified ? `Minimum reached: every OT hour is paid ${$(rate)}/h.` : `${h2(st.remaining)}h more to reach the minimum. Until then OT is paid at the regular rate.`}</p></div></section>
+        <p>{!st.min ? `No minimum: OT is paid at ${$(rate)}/h.` : st.qualified ? `Minimum reached: every OT hour is paid ${$(rate)}/h.`
+          : st.final ? 'The minimum was not reached, so OT is paid at the regular rate.'
+          : `Shown at ${$(rate)}/h for now. ${h2(st.remaining)}h more is needed by the end; if it isn’t reached, all of this OT drops to the regular rate.`}</p></div></section>
   )
 }
 

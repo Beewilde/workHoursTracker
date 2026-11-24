@@ -182,3 +182,17 @@ test('rest days count as RD without being logged; RD OT still works on them', as
   assert.equal(cal.days['2026-11-03'][id.Sib], 'rd'); assert.equal(cal.days['2026-11-06'][id.Sib], 'leave')
   assert.equal(cal.days['2026-11-04'][id.Me], 'rdot')
 })
+
+test('OT shows at the OT rate while the month is still running; at month end, below the minimum → regular rate', async () => {
+  const { call, id } = await setup()
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date())
+  const thisMonth = today.slice(0, 7), lastMonth = new Date(Date.UTC(+today.slice(0, 4), +today.slice(5, 7) - 2, 1)).toISOString().slice(0, 7)
+  for (const m of [lastMonth, thisMonth]) {
+    await call('PUT', `/schedule/${m}`, { weekdays: [], ot_min: 20, ot_rate: 8 })
+    await call('PUT', `/day/${m}-01`, { entries: [w(id.Me, '16:00', '01:00', { ot_hours: 4 })] })      // 4h of 20h
+  }
+  const ot = async (m) => (await call('GET', `/summary/${m}`)).rows.find((r) => r.worker.name === 'Me').otPay
+  assert.equal(await ot(thisMonth), 32)            // running: 4h × $8, provisional
+  assert.equal(await ot(lastMonth), 20)            // over and below 20h: 4h × $5
+  assert.equal((await call('GET', `/summary/${thisMonth}`)).otMonth.final, false)
+})
