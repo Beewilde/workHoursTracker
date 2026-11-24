@@ -92,6 +92,12 @@ async function useFamily(id) {
 }
 export async function joinFamily(code) { await useFamily(must(await supabase.rpc('join_household', { p_code: code }))) }
 export const openFamily = (id) => useFamily(id)
+// who is in the organization (email, role, joined, last active); `me` marks this login
+export async function listMembers(id) {
+  const [{ data: { user } }, rows] = await Promise.all([supabase.auth.getUser(), supabase.rpc('list_members', { p_household: id }).then(must)])
+  return rows.map((r) => ({ ...r, me: r.user_id === user?.id }))
+}
+export async function removeMember(id, userId) { must(await supabase.rpc('remove_member', { p_household: id, p_user: userId })) }
 export async function newInviteCode(id) { return must(await supabase.rpc('new_invite_code', { p_household: id })) }
 
 // after "Erase all" or "Restore backup": forget what was uploaded, so the next sync MERGES with
