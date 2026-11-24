@@ -91,20 +91,22 @@ export function createEngine(state, save = () => {}) {
   const capFor = (o, date) => (o.day_caps && o.day_caps[date] != null ? o.day_caps[date] : o.cap_hours)
 
   // Month settings: rest days, shift time, OT minimum and OT rate. A month that has not been set
-  // yet copies the latest earlier month (shown as "suggested"), or the defaults in Settings.
+  // yet copies the latest earlier month (shown as "suggested"), or the defaults in Settings —
+  // EXCEPT the OT minimum: the company sets it month by month, so each month starts without one
+  // (OT shows at the OT rate) until someone enters it; the month can't be marked paid before that.
   const MONTH_KEYS = ['weekdays', 'shift_start', 'shift_end', 'ot_min', 'ot_rate']
   function schedule(month) {
     const st = S.settings
-    const base = { weekdays: st.rd_default, shift_start: st.shift_start || '16:00', shift_end: st.shift_end || '01:00', ot_min: st.ot_min ?? null, ot_rate: st.ot_rate ?? 8 }
+    const base = { weekdays: st.rd_default, shift_start: st.shift_start || '16:00', shift_end: st.shift_end || '01:00', ot_min: null, ot_rate: st.ot_rate ?? 8 }
     const earlier = Object.keys(S.schedules).filter((m) => m < month).sort()
     // a month only overrides what it actually sets; empty = not set (copied from earlier months).
     // "No OT minimum this month" is stored as 0, so every phone reads it the same way.
     const isSet = (m, k) => S.schedules[m]?.[k] != null
     const from = (m) => Object.fromEntries(MONTH_KEYS.filter((k) => isSet(m, k)).map((k) => [k, S.schedules[m][k]]))
     let cfg = { ...base }
-    for (const m of earlier) cfg = { ...cfg, ...from(m) }
-    if (S.schedules[month]) return { ...cfg, ...from(month), confirmed: true }
-    return { ...cfg, confirmed: false }
+    for (const m of earlier) { const { ot_min: _own, ...rest } = from(m); cfg = { ...cfg, ...rest } }
+    const out = S.schedules[month] ? { ...cfg, ...from(month), confirmed: true } : { ...cfg, confirmed: false }
+    return { ...out, otMinSet: out.ot_min != null }
   }
   const workerView = (w) => { const r = ratesBy()[w.id] || []; return { ...w, rates: r, rate: rateOn(r, today()) } }
 
@@ -120,7 +122,7 @@ export function createEngine(state, save = () => {}) {
       // the pool this day's OT counts toward: the offer (if it has its own minimum) or the month
       otPool: ownPool
         ? { kind: 'offer', name: offer.name, rate: offer.qualified_rate, ...(stats[offer.id] || { total: 0, min: offer.min_hours, qualified: false, final: false, remaining: offer.min_hours }) }
-        : { kind: 'month', name: month, rate: offer?.qualified_rate ?? sch.ot_rate, ...(ev.monthStats[month] || { total: 0, min: Number(sch.ot_min) || 0, qualified: !(Number(sch.ot_min) > 0), final: today() > daysInMonth(month).at(-1), remaining: Number(sch.ot_min) || 0 }) },
+        : { kind: 'month', name: month, minSet: sch.otMinSet, rate: offer?.qualified_rate ?? sch.ot_rate, ...(ev.monthStats[month] || { total: 0, min: Number(sch.ot_min) || 0, qualified: !(Number(sch.ot_min) > 0), final: today() > daysInMonth(month).at(-1), remaining: Number(sch.ot_min) || 0 }) },
       ownerId: S.workers.find((w) => w.owner)?.id ?? null,
       workers: workers.map((w) => ({
         id: w.id, name: w.name, color: w.color, owner: !!w.owner, rate: rateOn(rates[w.id], date), paid: isPaid(month, w.id),
@@ -301,7 +303,7 @@ export function createEngine(state, save = () => {}) {
     }
     for (const k of ['shift_start', 'shift_end']) if (body[k] !== undefined) { need(toMin(body[k]) != null, 'Enter the shift time'); next[k] = body[k] }
     need(spanMin(next.shift_start, next.shift_end) > 0, 'The shift end must differ from its start')
-    if (body.ot_min !== undefined) next.ot_min = num(body.ot_min, 'Monthly OT minimum', { nullable: true, max: 744 }) ?? 0
+    if (body.ot_min !== undefined) next.ot_min = num(body.ot_min, 'Monthly OT minimum', { nullable: true, max: 744 })   // blank = not known yet
     if (body.ot_rate !== undefined) next.ot_rate = num(body.ot_rate, 'OT rate')
     const ch = ['shift_start', 'shift_end', 'ot_min', 'ot_rate'].some((k) => (cur[k] ?? null) !== (next[k] ?? null))
     if (ch && Object.keys(S.paid).some((k) => k.startsWith(m + '|'))) throw err(409, `${m} is already paid for someone, so its shift time and OT settings are locked.`)
@@ -369,7 +371,7 @@ export function createEngine(state, save = () => {}) {
       // workdays (not a rest day, not leave, not in the future) with nobody logged as working
       month, rows, notLogged: missingDays(month).length, missingDays: missingDays(month),
       otMonth: monthStats[month] || { total: 0, min: Number(schedule(month).ot_min) || 0, qualified: !(Number(schedule(month).ot_min) > 0), final: today() > daysInMonth(month).at(-1), remaining: Number(schedule(month).ot_min) || 0 },
-      otRate: schedule(month).ot_rate, phpRate: S.settings.php_rate ?? null, phpRateDate: S.settings.php_rate_date ?? null,
+      otRate: schedule(month).ot_rate, otMinSet: schedule(month).otMinSet, phpRate: S.settings.php_rate ?? null, phpRateDate: S.settings.php_rate_date ?? null,
       totals: { regularHours: sum('regularHours'), otHours: sum('otHours'), regularPay: sum('regularPay'), otPay: sum('otPay'), bonusTotal: sum('bonusTotal'), total: sum('total') },
       offers: S.offers.filter((o) => o.start_date.slice(0, 7) <= month && o.end_date.slice(0, 7) >= month).map((o) => ({ ...o, stats: stats[o.id] })),
     }
@@ -384,6 +386,8 @@ export function createEngine(state, save = () => {}) {
     if (body.paid) {
       const open = S.offers.find((o) => o.start_date.slice(0, 7) <= month && o.end_date.slice(0, 7) >= month && o.end_date >= today() && S.entries.some((e) => e.ot_offer_id === o.id && e.worker_id === wid && e.date.startsWith(month)))
       if (open) throw err(409, `"${open.name}" is still running, so OT pay is provisional. Mark paid after ${open.end_date}.`)
+      const poolOT = S.entries.some((e) => e.worker_id === wid && e.date.startsWith(month) && e.ot_hours > 0 && !(S.offers.find((o) => o.id === e.ot_offer_id)?.min_hours != null))
+      if (poolOT && !schedule(month).otMinSet) throw err(409, `Set ${month}'s OT minimum first (Settings → ${month}; enter 0 if there was none). OT pay depends on it.`)
       const monthOT = today() <= daysInMonth(month).at(-1) && S.entries.some((e) => e.worker_id === wid && e.date.startsWith(month) && e.ot_hours > 0 && !(S.offers.find((o) => o.id === e.ot_offer_id)?.min_hours != null))
       if (monthOT) throw err(409, `${month} is not over, so OT pay is still provisional (the monthly minimum is checked at month end).`)
       const r = report(month).report[wid]

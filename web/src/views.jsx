@@ -93,6 +93,7 @@ export function SummaryPage({ month, setMonth }) {
         <Metric label="Regular pay" value={$(t.regularPay)} /><Metric label="OT pay" value={$(t.otPay)} /><Metric label="Review bonuses" value={$(t.bonusTotal)} />
       </div>
       {data.notLogged > 0 && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>{data.notLogged} workday{data.notLogged === 1 ? '' : 's'} with nothing logged</strong><p>{data.missingDays.slice(0, 8).map((d) => fmtDate(d, { month: 'short', day: 'numeric' })).join(', ')}{data.missingDays.length > 8 ? '…' : ''}. Log who worked, or mark the day as leave.</p></div></div>}
+      {data.otMonth.total > 0 && !data.otMinSet && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Set this month’s OT minimum</strong><p>OT shows at {$(data.otRate)}/h for now. Enter the company’s minimum in Settings → {monthLabel(month)} (0 if there was none). The month can’t be marked paid until then.</p></div></div>}
       {(data.otMonth.total > 0 || data.otMonth.min > 0) && <OtPoolCard title={`${monthLabel(month)} OT (monthly minimum)`} st={data.otMonth} rate={data.otRate} />}
       <div className="section-heading"><div><h2>Worker payouts</h2><p>Review earnings and payment status.</p></div><button className="outline-button" onClick={() => setUnpaidOnly(!unpaidOnly)}>{unpaidOnly ? 'Show all' : 'Unpaid only'}</button></div>
       <div className="payout-table surface">

@@ -108,10 +108,10 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
             <Field label="Shift ends (lunch included)"><input type="time" value={M.shift_end} onChange={(e) => setMon({ ...M, shift_end: e.target.value })} /></Field>
           </div>
           <div className="form-grid">
-            <Field label="OT minimum this month (hours, 0 = none)"><input type="number" min="0" step="0.5" value={M.ot_min} onChange={(e) => setMon({ ...M, ot_min: e.target.value })} /></Field>
+            <Field label="OT minimum this month (hours · 0 = none · blank = not known yet)"><input type="number" min="0" step="0.5" value={M.ot_min} onChange={(e) => setMon({ ...M, ot_min: e.target.value })} /></Field>
             <Field label="OT rate ($/h)"><input type="number" min="0" step="0.01" value={M.ot_rate} onChange={(e) => setMon({ ...M, ot_rate: e.target.value })} /></Field>
           </div>
-          <p className="muted-text" style={{ marginTop: 10 }}>The OT minimum counts everyone’s OT this month together (except OT under an offer that has its own minimum). Reached → every OT hour gets the OT rate; not reached → the regular rate. {sch.confirmed ? 'Saved for this month.' : 'Copied from the last month you set. Save to keep it for this month.'} The next month copies this one until you change it.</p>
+          <p className="muted-text" style={{ marginTop: 10 }}>The OT minimum counts everyone’s OT this month together (except OT under an offer that has its own minimum). Reached by month end → every OT hour gets the OT rate; not reached → the regular rate. Until the month ends, OT shows at the OT rate. The OT minimum starts blank every month, so enter what the company set; the month can’t be marked paid until it is filled in. {sch.confirmed ? 'Saved for this month.' : 'Shift time and rest days are copied from the last month you set. Save to keep them for this month.'}</p>
           <button className="primary-button small" style={{ marginTop: 10 }} onClick={saveMonth}>{sch.confirmed ? 'Save' : 'Confirm'} {monthLabel(month)}</button></div>
       </section>
       <section className="settings-group">

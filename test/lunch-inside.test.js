@@ -104,8 +104,9 @@ test('OT minimum per MONTH: every OT hour of the month from everyone counts', as
   assert.deepEqual(await pay(), { Me: [4, 32], Sib: [11, 88] })                          // 15 h reached → every OT hour $8
   const sum = await call('GET', '/summary/2026-10')
   assert.deepEqual([sum.otMonth.total, sum.otMonth.min, sum.otMonth.qualified, sum.otMonth.final], [15, 15, true, true])
-  // November copies October's minimum and is provisional until the month is over
-  assert.equal((await call('GET', '/schedule/2026-11')).ot_min, 15)
+  // the OT minimum is NOT copied to the next month (the company sets it month by month)
+  const nov = await call('GET', '/schedule/2026-11')
+  assert.equal(nov.ot_min, null); assert.equal(nov.otMinSet, false); assert.equal(nov.ot_rate, 8)
 })
 
 test('OT minimum per OFFER when the announcement sets its own', async () => {
@@ -195,4 +196,17 @@ test('OT shows at the OT rate while the month is still running; at month end, be
   assert.equal(await ot(thisMonth), 32)            // running: 4h × $8, provisional
   assert.equal(await ot(lastMonth), 20)            // over and below 20h: 4h × $5
   assert.equal((await call('GET', `/summary/${thisMonth}`)).otMonth.final, false)
+})
+
+test('a month with OT can only be marked paid once its OT minimum is entered (0 = none)', async () => {
+  const { call, id } = await setup()
+  await call('PUT', '/schedule/2026-09', { ot_min: 20 })
+  await call('PUT', '/day/2026-10-05', { entries: [w(id.Me, '16:00', '01:00', { ot_hours: 2 })] })
+  assert.equal((await call('GET', '/summary/2026-10')).otMinSet, false)             // September's 20 is not carried over
+  await assert.rejects(call('PUT', `/paid/2026-10/${id.Me}`, { paid: true }), /OT minimum first/)
+  await call('PUT', '/schedule/2026-10', { ot_min: 0 })
+  await call('PUT', `/paid/2026-10/${id.Me}`, { paid: true })
+  assert.equal((await call('GET', '/summary/2026-10')).rows.find((r) => r.worker.name === 'Me').otPay, 16)
+  await call('PUT', '/schedule/2026-11', { ot_min: '' })                             // blank stays "not known yet"
+  assert.equal((await call('GET', '/schedule/2026-11')).otMinSet, false)
 })
