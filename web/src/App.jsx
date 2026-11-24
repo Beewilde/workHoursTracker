@@ -10,7 +10,7 @@ import { startCloud, cloudConfigured } from './cloud.js'
 
 const NAV = [
   ['daily', 'Daily Log', 'grid'], ['account', 'Account Day', 'clock'], ['calendar', 'Calendar', 'calendar'], ['summary', 'Month Summary', 'wallet'],
-  ['ot', 'OT Offers', 'briefcase'], ['bonuses', 'Review Bonuses', 'gift'], ['workers', 'Workers & Rates', 'users'], ['files', 'Import / Export', 'file'], ['family', 'Family sync', 'users'], ['settings', 'Settings', 'settings'],
+  ['ot', 'OT Offers', 'briefcase'], ['bonuses', 'Review Bonuses', 'gift'], ['workers', 'Workers & Rates', 'users'], ['files', 'Import / Export', 'file'], ['family', 'Organization', 'users'], ['settings', 'Settings', 'settings'],
 ]
 const BOTTOM = [['daily', 'Daily Log', 'grid'], ['calendar', 'Calendar', 'calendar'], ['summary', 'Summary', 'wallet'], ['more', 'More', 'more']]
 
@@ -31,7 +31,7 @@ function MainApp({ dark, setDark }) {
   const needsWorkers = ['daily', 'account', 'calendar', 'summary', 'bonuses'].includes(page) && active.length === 0
   const meta = getEngine().meta()
   const days = meta.lastBackupAt ? Math.floor((Date.now() - Date.parse(meta.lastBackupAt)) / 864e5) : null
-  // a new family has nobody yet: start on Workers & Rates instead of an empty log
+  // a new organization has nobody yet: start on Workers & Rates instead of an empty log
   const screen = needsWorkers ? <WorkersPage onChange={reloadWorkers} /> : {
     daily: <DailyLog date={d} setDate={setDate} today={today} />,
     account: <AccountDay date={d} setDate={setDate} today={today} />,
@@ -54,7 +54,7 @@ function MainApp({ dark, setDark }) {
         </nav>
         <div className="sidebar-bottom">
           <button onClick={() => setDark(!dark)}><Icon name={dark ? 'sun' : 'moon'} /><span>{dark ? 'Light mode' : 'Dark mode'}</span></button>
-          <div className="side-profile" role="button" onClick={() => go('family')}><span className="avatar avatar-owner">SH</span><div><strong>{sync.household_id ? 'Family sync' : 'This device'}</strong><small>{sync.household_id || sync.state !== 'off' ? syncLabel(sync) : days === null ? 'No backup yet' : days === 0 ? 'Backed up today' : `Backup ${days}d ago`}</small></div><Icon name="more" size={17} /></div>
+          <div className="side-profile" role="button" onClick={() => go('family')}><span className="avatar avatar-owner">SH</span><div><strong>{sync.household_id ? 'Organization' : 'This device'}</strong><small>{sync.household_id || sync.state !== 'off' ? syncLabel(sync) : days === null ? 'No backup yet' : days === 0 ? 'Backed up today' : `Backup ${days}d ago`}</small></div><Icon name="more" size={17} /></div>
         </div>
       </aside>
       <div className="app-main">{screen}</div>
@@ -73,7 +73,7 @@ export default function App() {
   const setDark = (v) => { setDarkState(v); try { localStorage.setItem('shiftly-theme', v ? 'dark' : 'light') } catch { /* ignore */ } }
   const show = (msg, kind = 'ok') => { setToast({ msg, kind }); clearTimeout(show.t); show.t = setTimeout(() => setToast(null), 4500) }
   const sync = useSyncStatus()
-  // with family sync set up, the app opens on sign-in → join/create family, then the app itself
+  // with organization sync set up, the app opens on sign-in → join/create organization, then the app itself
   const gate = cloudConfigured && !sync.household_id && ['starting', 'signed-out', 'no-family'].includes(sync.state)
   return (
     <ToastCtx.Provider value={show}>

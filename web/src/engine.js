@@ -67,7 +67,7 @@ export function createEngine(state, save = () => {}) {
     inside: !!S.settings.lunch_inside, insideFrom: S.settings.lunch_inside_from || null, shiftByMonth: Object.fromEntries(months.map((m) => [m, shiftMin(m)])) })
   const monthCfg = (m) => schedule(m)
   const report = (month, workers = S.workers) => monthReport({ month, workers, rates: ratesBy(), entries: S.entries, offers: S.offers, bonuses: S.bonuses, today: today(), lunch: lunchCfg(month), accountDays: S.accountDays, monthCfg })
-  const shiftMin = (m) => { const c = schedule(m); return spanMin(c.shift_start, c.shift_end) }
+  const shiftMin = (m) => { const c = schedule(m); return spanMin(c.shift_start, c.shift_end) || 540 }
   const isLeave = (date) => S.accountDays[date]?.day_off === 'leave'
   // Lunch rule 2 = PAID lunch added to the workers' time (8 worked hours -> lunch applies).
   // Older saved data: no lunch settings yet -> start the rule today so existing days keep their numbers;
@@ -97,7 +97,10 @@ export function createEngine(state, save = () => {}) {
     const st = S.settings
     const base = { weekdays: st.rd_default, shift_start: st.shift_start || '16:00', shift_end: st.shift_end || '01:00', ot_min: st.ot_min ?? null, ot_rate: st.ot_rate ?? 8 }
     const earlier = Object.keys(S.schedules).filter((m) => m < month).sort()
-    const from = (m) => Object.fromEntries(MONTH_KEYS.filter((k) => S.schedules[m]?.[k] !== undefined).map((k) => [k, S.schedules[m][k]]))
+    // a month only overrides what it actually sets; empty = not set (copied from earlier months).
+    // "No OT minimum this month" is stored as 0, so every phone reads it the same way.
+    const isSet = (m, k) => S.schedules[m]?.[k] != null
+    const from = (m) => Object.fromEntries(MONTH_KEYS.filter((k) => isSet(m, k)).map((k) => [k, S.schedules[m][k]]))
     let cfg = { ...base }
     for (const m of earlier) cfg = { ...cfg, ...from(m) }
     if (S.schedules[month]) return { ...cfg, ...from(month), confirmed: true }
@@ -298,7 +301,7 @@ export function createEngine(state, save = () => {}) {
     }
     for (const k of ['shift_start', 'shift_end']) if (body[k] !== undefined) { need(toMin(body[k]) != null, 'Enter the shift time'); next[k] = body[k] }
     need(spanMin(next.shift_start, next.shift_end) > 0, 'The shift end must differ from its start')
-    if (body.ot_min !== undefined) next.ot_min = num(body.ot_min, 'Monthly OT minimum', { nullable: true, max: 744 })
+    if (body.ot_min !== undefined) next.ot_min = num(body.ot_min, 'Monthly OT minimum', { nullable: true, max: 744 }) ?? 0
     if (body.ot_rate !== undefined) next.ot_rate = num(body.ot_rate, 'OT rate')
     const ch = ['shift_start', 'shift_end', 'ot_min', 'ot_rate'].some((k) => (cur[k] ?? null) !== (next[k] ?? null))
     if (ch && Object.keys(S.paid).some((k) => k.startsWith(m + '|'))) throw err(409, `${m} is already paid for someone, so its shift time and OT settings are locked.`)

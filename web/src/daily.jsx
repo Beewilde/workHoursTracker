@@ -142,7 +142,7 @@ export function DailyLog({ date, setDate, today }) {
   return (
     <>
       <Page title="Daily Log" eyebrow={eyebrow} narrow={false} className="daily-page">
-        {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the family updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
+        {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the organization updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
         <DayNav date={date} setDate={setDate} today={today} />
         <section className="overview-card">
           <div className="overview-title"><div><p className="eyebrow">Account shift · {T(day.shift.start)} – {T(day.shift.end)}</p><h2>{leave ? 'Leave · no work' : day.isRestDay ? 'Rest day' : 'Shift coverage'}</h2></div>
@@ -306,7 +306,7 @@ export function AccountDay({ date, setDate, today }) {
   }
   return (
     <Page title="Account Day" eyebrow={eyebrow}>
-      {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the family updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
+      {d.stale && <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Changed on another phone</strong><p>Someone in the organization updated this day while you were editing.</p></div><button onClick={d.reload}>Load theirs</button></div>}
       <DayNav date={date} setDate={setDate} today={today} />
       <section className="surface account-shift">
         <div className="section-heading" style={{ marginTop: 0 }}>

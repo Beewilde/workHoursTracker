@@ -7,7 +7,7 @@
 //            deletion. The server can refuse a row (e.g. a paid-month lock); then this phone
 //            takes the server's version and the refusal is reported.
 // "What the server last confirmed" is `base`: a fingerprint per row, kept in the sync meta.
-// Conflicts resolve as "the phone that syncs last wins", which is fine for a family of 3–7.
+// Conflicts resolve as "the phone that syncs last wins", which is fine for a organization of 3–7.
 
 export const ENTRY_COLS = ['status', 'time_in', 'time_out', 'lunch_min', 'ot_hours', 'ot_start', 'ot_end', 'ot_position', 'ot_offer_id', 'rate_override', 'rate_override_reason', 'remark']
 
@@ -26,7 +26,7 @@ export const TABLES = {
 const NAMES = Object.keys(TABLES)
 const TIME_COLS = new Set(['time_in', 'time_out', 'ot_start', 'ot_end', 'chat_time', 'shift_start', 'shift_end'])
 const NUM_COLS = new Set(['rate', 'cap_hours', 'min_hours', 'qualified_rate', 'below_min_rate', 'lunch_min', 'ot_hours', 'rate_override', 'amount', 'company_hours', 'lunch_hours', 'total', 'ot_min', 'ot_rate'])
-const LOCAL_ONLY_SETTINGS = []          // every setting is shared by the family
+const LOCAL_ONLY_SETTINGS = []          // every setting is shared by the organization
 
 const keyOf = (t, r) => TABLES[t].key.map((k) => String(r[k])).join('|')
 const sortKeys = (v) => Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v
@@ -78,7 +78,8 @@ function applyRow(S, t, key, row) {
     case 'entries': return upsert('entries', row)
     case 'bonuses': return upsert('bonuses', row)
     case 'account_days': if (row) S.accountDays[key] = row; else delete S.accountDays[key]; return
-    case 'schedules': if (row) { const { month: _m, ...v } = row; S.schedules[key] = v } else delete S.schedules[key]; return
+    // keep only what the month really sets (a column that was never set arrives as null)
+    case 'schedules': if (row) { const { month: _m, ...v } = row; S.schedules[key] = Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null)) } else delete S.schedules[key]; return
     case 'payouts': if (row) S.paid[key] = { ...row.snapshot, at: row.paid_at }; else delete S.paid[key]; return
   }
 }

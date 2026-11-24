@@ -24,7 +24,7 @@ export function downloadBackup() {
   const { filename, json } = getEngine().backup()
   return save(new Blob([json], { type: 'application/json' }), filename)
 }
-// with family sync on, these only change THIS phone: the next sync merges with the family copy
+// with organization sync on, these only change THIS phone: the next sync merges with the organization copy
 export const restoreBackup = async (text) => { const r = getEngine().restore(text); (await import('./cloud.js')).forgetSyncedState(); return r }
 export const eraseAll = async () => { getEngine().reset(); (await import('./cloud.js')).forgetSyncedState() }
 export const loadDemo = () => getEngine().loadDemo()
