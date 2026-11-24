@@ -37,7 +37,7 @@ export function CalendarPage({ month, setMonth, today, openDay }) {
               <div className="day-dots">
                 {data.workers.filter((w) => filter === 'all' || w.id === filter).map((w) => {
                   const s = data.days[d][w.id]
-                  if (s === 'not_logged') return null
+                  if (s === 'not_logged' || s === 'leave') return null
                   if (s === 'rd' || s === 'not_worked') return <i key={w.id} className="grey" />
                   if (s === 'training') return <i key={w.id} className="green" />
                   return <i key={w.id} style={{ background: w.color }} />

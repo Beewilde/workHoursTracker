@@ -169,3 +169,16 @@ test('pesos: a USD→PHP rate is shown next to the pay, and a paid month keeps i
   await call('PUT', '/settings', { php_rate: '' })
   assert.equal((await call('GET', '/summary/2026-10')).phpRate, null)                  // blank = pesos hidden
 })
+
+test('rest days count as RD without being logged; RD OT still works on them', async () => {
+  const { call, id } = await setup()
+  await call('PUT', '/schedule/2026-11', { weekdays: [2, 3] })                       // Tue/Wed
+  await call('PUT', '/day/2026-11-04', { entries: [{ worker_id: id.Me, status: 'rdot', time_in: '23:00', time_out: '00:00' }] })
+  await call('PUT', '/day/2026-11-06', { account: { day_off: 'leave' }, entries: [] })
+  const sum = await call('GET', '/summary/2026-11')
+  assert.equal(sum.rows.find((r) => r.worker.name === 'Sib').restDays, 8)            // 8 Tue/Wed in Nov 2026, none logged
+  assert.equal(sum.rows.find((r) => r.worker.name === 'Me').restDays, 7)             // Nov 4 is RD OT instead
+  const cal = await call('GET', '/calendar/2026-11')
+  assert.equal(cal.days['2026-11-03'][id.Sib], 'rd'); assert.equal(cal.days['2026-11-06'][id.Sib], 'leave')
+  assert.equal(cal.days['2026-11-04'][id.Me], 'rdot')
+})

@@ -208,7 +208,7 @@ export function createEngine(state, save = () => {}) {
     const a = body.account
     if (a && a.company_hours != null && a.company_hours !== '' && cov.hours) {
       // the company shows the whole shift including the paid lunch
-      const total = lp.inside ? cov.hours : cov.hours + lp.totalMin / 60
+      const total = lp.inside ? cov.hours + (lp.poolMin - lp.insideMin) / 60 : cov.hours + lp.totalMin / 60
       if (Math.abs(total - Number(a.company_hours)) > 0.01) warnings.push({ type: 'mismatch', siblings: total, company: Number(a.company_hours) })
     }
     const acct = a && { date, company_hours: num(a.company_hours, 'Company hours', { nullable: true, max: 48 }), lunch_hours: num(a.lunch_hours, 'Lunch hours', { nullable: true, max: 12 }), note: a.note || null, day_off: a.day_off === 'leave' ? 'leave' : null }

@@ -184,6 +184,9 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
   const byDate = new Map()
   for (const e of entries) { if (!byDate.has(e.date)) byDate.set(e.date, []); byDate.get(e.date).push(e) }
   const planFor = (date) => lunch && lunchPlan(byDate.get(date) || [], { ...lunch, override: accountDays?.[date]?.lunch_hours, date })
+  // a scheduled rest day (or a leave day) with nothing logged counts as such without anyone saving it
+  const restDays = new Set(monthCfg(month)?.weekdays || [])
+  const virtual = (date) => (accountDays?.[date]?.day_off === 'leave' ? 'leave' : restDays.has(weekday(date)) ? 'rd' : 'not_logged')
   for (const w of workers) {
     const map = Object.fromEntries(entries.filter((e) => e.worker_id === w.id).map((e) => [e.date, e]))
     const rows = dates.map((date) => {
@@ -196,7 +199,7 @@ export function monthReport({ month, workers, rates, entries, offers, bonuses, t
       const rate = e?.rate_override ?? rateOn(rates[w.id], date)
       const ot = e && byEntry[e.id]
       return {
-        date, entryId: e?.id ?? null, status: e ? e.status : 'not_logged',
+        date, entryId: e?.id ?? null, status: e ? e.status : virtual(date),
         time_in: e?.time_in ?? null, time_out: e?.time_out ?? null,
         hours, elapsed, lunchMin, lunchShare, rate, pay: r2(hours * rate),
         ot_hours: e?.ot_hours || 0, ot_start: e?.ot_start ?? null, ot_end: e?.ot_end ?? null,

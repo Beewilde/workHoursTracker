@@ -296,9 +296,10 @@ export function AccountDay({ date, setDate, today }) {
   const otTotal = otRows.reduce((s, r) => s + Number(r.f.ot_hours), 0)
   const ot = day.offer && otTotal > 0 ? deriveOT(cov, form.ot_position, [otTotal])[0] : null
   const ch = form.account.company_hours === '' ? null : Number(form.account.company_hours)
-  // a gap that fits inside the paid lunch is the lunch break itself, not a hole in the coverage
-  const lunchGap = cov.status === 'gap' && cov.gap <= plan.poolMin + 0.5
-  const validation = cov.status === 'empty' ? ['empty', 'No shifts yet'] : cov.status === 'ok' ? ['ok', 'Full coverage'] : cov.status === 'gap' ? (lunchGap ? ['ok', `Lunch break ${Math.round(cov.gap)}m`] : ['gap', `${Math.round(cov.gap - plan.poolMin)}m uncovered`]) : ['overlap', `${cov.overlap}m overlap`]
+  // a gap that fits the part of the lunch NOT already inside the times is the lunch break itself
+  const lunchFree = plan.poolMin - (plan.insideMin || 0)
+  const lunchGap = cov.status === 'gap' && cov.gap <= lunchFree + 0.5
+  const validation = cov.status === 'empty' ? ['empty', 'No shifts yet'] : cov.status === 'ok' ? ['ok', 'Full coverage'] : cov.status === 'gap' ? (lunchGap ? ['ok', `Lunch break ${Math.round(cov.gap)}m`] : ['gap', `${Math.round(cov.gap - lunchFree)}m uncovered`]) : ['overlap', `${cov.overlap}m overlap`]
   const addBlock = (w) => {
     const start = cov.start != null ? fmtMin(cov.end) : day.presets[0]?.time_in || '16:00'
     const end = cov.start != null ? fmtMin(cov.end + 270) : day.presets[0]?.time_out || '20:30'
@@ -314,7 +315,7 @@ export function AccountDay({ date, setDate, today }) {
         </div>
         <div className="account-stats">
           <Metric label="Worked" value={cov.hours ? hm(cov.hours) : '—'} />
-          <Metric label="Paid lunch added" value={plan.totalMin > 0 ? hm(plan.totalMin / 60) : 'None'} />
+          <Metric label="Paid lunch" value={plan.poolMin > 0 ? hm(plan.poolMin / 60) : 'None'} />
           <Metric label="Paid hours" value={cov.hours ? hm(timedRows.reduce((s, r) => s + paidHours(r.f, plan), 0)) : '—'} />
         </div>
         <div className="form-grid three">
@@ -322,7 +323,7 @@ export function AccountDay({ date, setDate, today }) {
           <Field label="Paid lunch to add (hours)"><input type="number" min="0" step="0.25" placeholder={autoPlan.totalMin > 0 ? `auto: ${Math.round(autoPlan.totalMin) / 60}` : 'auto: none'} value={form.account.lunch_hours} onChange={(e) => setForm({ ...form, account: { ...form.account, lunch_hours: e.target.value } })} /></Field>
           <Field label="Note"><input value={form.account.note} onChange={(e) => setForm({ ...form, account: { ...form.account, note: e.target.value } })} /></Field>
         </div>
-        {ch != null && cov.hours > 0 && Math.abs(ch - (cov.hours + plan.totalMin / 60)) > 0.01 && <div className="alert-banner compact" style={{ marginBottom: 0 }}><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Hours don’t match</strong><p>Workers’ paid time (worked + lunch) is {hm(cov.hours + plan.totalMin / 60)}, but the company shows {hm(ch)}. Informational only; pay is not affected.</p></div></div>}
+        {ch != null && cov.hours > 0 && Math.abs(ch - (cov.hours + lunchFree / 60)) > 0.01 && <div className="alert-banner compact" style={{ marginBottom: 0 }}><span className="alert-icon"><Icon name="alert" size={19} /></span><div><strong>Hours don’t match</strong><p>Workers’ paid time (worked + lunch) is {hm(cov.hours + lunchFree / 60)}, but the company shows {hm(ch)}. Informational only; pay is not affected.</p></div></div>}
       </section>
 
       <section className="surface timeline-card">

@@ -59,4 +59,4 @@ export const addMonths = (m, n) => { const [y, mm] = m.split('-').map(Number); r
 export const fmtDate = (s, o = { weekday: 'short', month: 'short', day: 'numeric' }) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-US', { timeZone: 'UTC', ...o })
 export const monthLabel = (m) => fmtDate(m + '-01', { month: 'long', year: 'numeric' })
 export const todayIn = (tz) => new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'Asia/Manila' }).format(new Date())
-export const STATUS = { worked: 'Worked', rd: 'Rest day', not_worked: 'Not worked', training: 'Training', not_logged: 'Not logged' }
+export const STATUS = { worked: 'Worked', rd: 'Rest day', not_worked: 'Not worked', training: 'Training', not_logged: 'Not logged', leave: 'Leave' }
