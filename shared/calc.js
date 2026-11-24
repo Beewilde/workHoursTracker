@@ -19,11 +19,15 @@ export const regHours = (e) =>
 // ── Paid lunch ──
 // TWO ways a day can be written down (settings.lunch_inside picks one, from settings.lunch_inside_from):
 //
-// "inside" (current): the logged times already CONTAIN the lunch hour, e.g. 4pm–8:30pm + 8:30pm–1am
-//   for a 4pm–1am shift (9 paid hours = 8 work + 1 lunch). The day's total stays exactly the covered
-//   time; lunch only decides WHO gets that hour. It is taken out of everyone's time in proportion to
-//   how long they covered, then given back by the split the workers agreed on (equal by default,
-//   custom minutes per person, or all to one person such as the account owner).
+// "inside" (current): a shift (e.g. 4pm–1am) pays 9 hours = 8 work + 1 paid lunch, and the day can be
+//   written down either way:
+//     • work hours only (4h + 4h = 8h)            → the lunch hour is ADDED on top
+//     • times that include the lunch (4:00–8:30 + 8:30–1:00 = 9h) → the hour is already inside, so it is
+//       taken out of everyone's time in proportion to how long they covered
+//   How much is "inside" is decided by comparing the logged time with the shift: logged − (shift − lunch),
+//   between 0 and the lunch. Then the lunch is given out by the split the workers agreed on (equal by
+//   default, custom minutes per person, or all to one person such as the account owner), so the day
+//   always pays the shift.
 //
 // "added" (older records): the times are real work only and the lunch hour is ADDED on top:
 // Shared PAID lunch: a full shift is 8 worked hours plus 1 hour of lunch that is paid at the same rate.
@@ -47,20 +51,22 @@ export function lunchPlan(entries, cfg = {}) {
   if (blocked) source = 'before-start'
   else if (manualOverride) { pool = Number(override) * 60; source = 'manual' }
   else if (inside ? auto && worked.length : auto && worked.length && elapsed >= threshold - 1e-9) { pool = minutes; source = 'auto' }
-  if (inside) pool = Math.min(pool, coveredMin)          // the lunch can't be longer than the time that was covered
+  // how much of the lunch is already inside the logged times (see above)
+  const shiftMin = cfg.shiftByMonth?.[date?.slice(0, 7)] ?? cfg.shiftMin ?? 540
+  const insideMin = inside ? Math.max(0, Math.min(pool, coveredMin - (shiftMin - pool))) : 0
   const givenTo = blocked ? [] : entries.filter(hasMan)
   const given = givenTo.reduce((s, e) => s + Number(e.lunch_min), 0)
   const autoWorkers = worked.filter((e) => !hasMan(e))
   const perMin = autoWorkers.length ? Math.max(0, pool - given) / autoWorkers.length : 0
   // minutes of lunch credited to this person
   const minFor = (e) => (!e || blocked ? 0 : hasMan(e) ? Number(e.lunch_min) : e.status === 'worked' ? perMin : 0)
-  // "inside": minutes of lunch taken out of this person's covered time (in proportion to it)
-  const deductFor = (e) => (inside && e && e.status === 'worked' && coveredMin > 0 ? (pool * spanMin(e.time_in, e.time_out)) / coveredMin : 0)
+  // minutes of lunch taken out of this person's logged time (only the part that was inside it, in proportion)
+  const deductFor = (e) => (insideMin > 0 && e && e.status === 'worked' && coveredMin > 0 ? (insideMin * spanMin(e.time_in, e.time_out)) / coveredMin : 0)
   // what lunch changes for this person, in minutes (negative = they covered the lunch and it went to others)
   const adjFor = (e) => minFor(e) - deductFor(e)
   return {
     poolMin: pool, totalMin: given + perMin * autoWorkers.length, perMin, n: worked.length, autoN: autoWorkers.length,
-    givenMin: given, givenN: givenTo.length, elapsed, source, inside, overGiven: inside && given > pool + 1e-9, minFor, deductFor, adjFor,
+    givenMin: given, givenN: givenTo.length, elapsed, source, inside, insideMin, shiftMin, coveredMin, overGiven: inside && given > pool + 1e-9, minFor, deductFor, adjFor,
   }
 }
 // paid hours of one entry = covered time + what the lunch split changes for it

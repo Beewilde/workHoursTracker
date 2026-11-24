@@ -38,7 +38,7 @@ test('a rate change cannot reach back into a paid month', async () => {
   await assert.rejects(call('POST', `/workers/${a}/rates`, { effective_from: '2026-11-15', rate: 9 }), /already paid/)
   await call('POST', `/workers/${a}/rates`, { effective_from: '2026-12-01', rate: 9 })
   const row = (await call('GET', '/summary/2026-11')).rows.find((r) => r.worker.id === a)
-  assert.equal(row.total, 22.5); assert.equal(row.paidTotal, 22.5); assert.equal(row.changedSincePaid, false)
+  assert.equal(row.total, 27.5); assert.equal(row.paidTotal, 27.5); assert.equal(row.changedSincePaid, false)   // 4h30 + the 1h lunch (alone that day)
 })
 
 test('a paid month shows when later setting changes would give a different total', async () => {
@@ -47,9 +47,9 @@ test('a paid month shows when later setting changes would give a different total
     { worker_id: a, status: 'worked', time_in: '16:00', time_out: '20:00' },
     { worker_id: b, status: 'worked', time_in: '20:00', time_out: '00:00' }] })
   await call('PUT', `/paid/2026-11/${a}`, { paid: true })
-  await call('PUT', '/settings', { lunch_inside: false, lunch_from: null })      // switch to the older "lunch added on top" rule
+  await call('PUT', '/settings', { lunch_minutes: 30 })                          // lunch made shorter after the month was paid
   const row = (await call('GET', '/summary/2026-11')).rows.find((r) => r.worker.id === a)
-  assert.equal(row.paidTotal, 20); assert.equal(row.total, 22.5); assert.equal(row.changedSincePaid, true)
+  assert.equal(row.paidTotal, 22.5); assert.equal(row.total, 21.25); assert.equal(row.changedSincePaid, true)
 })
 
 test('an OT offer with paid OT cannot have its dates or rates changed', async () => {

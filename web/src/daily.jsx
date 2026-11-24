@@ -128,7 +128,8 @@ export function DailyLog({ date, setDate, today }) {
   }
   const n = rows.length
   const owner = day.workers.find((w) => w.owner)
-  const covered = rows.filter((r) => isTimed(r.f) && r.f.time_in && r.f.time_out).reduce((s, r) => s + spanMin(r.f.time_in, r.f.time_out), 0)
+  // paid regular time vs the shift (work hours + the paid lunch, however the day was written down)
+  const covered = Math.round(regH * 60)
   const leave = form.account.day_off === 'leave'
   const setLeave = (on) => setForm({ ...form, account: { ...form.account, day_off: on ? 'leave' : null }, w: on ? Object.fromEntries(Object.entries(form.w).map(([k, v]) => [k, { ...v, status: v.status === 'worked' || v.status === 'training' || v.status === 'rdot' ? '' : v.status }])) : form.w })
   // lunch split presets: equal (automatic), all to the owner, or custom minutes per person
@@ -159,7 +160,7 @@ export function DailyLog({ date, setDate, today }) {
         </section>
         {!leave && !day.isRestDay && covered > 0 && Math.abs(covered - day.shift.minutes) > 1 && plan.inside && (
           <div className="alert-banner"><span className="alert-icon"><Icon name="alert" size={19} /></span>
-            <div><strong>{covered < day.shift.minutes ? `${hm((day.shift.minutes - covered) / 60)} of the shift not covered yet` : `${hm((covered - day.shift.minutes) / 60)} more than the shift`}</strong><p>The shift is {T(day.shift.start)} – {T(day.shift.end)} ({hm(day.shift.minutes / 60)}, lunch included). Times should add up to it.</p></div></div>
+            <div><strong>{covered < day.shift.minutes ? `${hm((day.shift.minutes - covered) / 60)} of the shift not logged yet` : `${hm((covered - day.shift.minutes) / 60)} more than the shift`}</strong><p>The shift is {T(day.shift.start)} – {T(day.shift.end)}: {hm((day.shift.minutes - plan.poolMin) / 60)} of work + {Math.round(plan.poolMin)} min paid lunch. Enter the work hours (e.g. 4h + 4h), or times that include the lunch (4:00–8:30 + 8:30–1:00).</p></div></div>
         )}
         {leave && <div className="info-card"><Icon name="calendar" size={18} /><div><strong>Leave day</strong><p>The account did not work today, so nobody is paid for it. Save to keep it marked.</p></div></div>}
         {day.isRestDay && <div className="info-card"><Icon name="calendar" size={18} /><div><strong>Scheduled rest day</strong><p>Matches this month’s rest-day schedule{day.schedule.confirmed ? '' : ' (suggested from last month; confirm it in Settings)'}. If OT was offered, mark who did it as “RD OT”.</p></div></div>}
@@ -169,8 +170,8 @@ export function DailyLog({ date, setDate, today }) {
             {p.min > 0 && <div className="progress-track" style={{ marginTop: 8 }}><span style={{ width: pct + '%' }} /></div>}
             {day.offer && day.offer.cap_today != null && <div className="form-grid" style={{ marginTop: 10, maxWidth: 260 }}><Field label="OT available today (hours)"><input type="number" min="0.25" step="0.25" key={date + ':' + day.offer.cap_today} defaultValue={day.offer.cap_today} onBlur={(e) => e.target.value !== String(day.offer.cap_today) && saveCap(e.target.value)} /></Field></div>}</div></div>) })()}
         {!leave && plan.inside && plan.poolMin > 0 && (
-          <div className="info-card"><Icon name="clock" size={18} /><div><strong>Lunch hour ({Math.round(plan.poolMin)} min, inside the shift)</strong>
-            <p>{lunchMode === 'owner' ? `Goes to ${owner.name} (calls during lunch).` : lunchMode === 'custom' ? 'Split by the minutes you set for each person below.' : `Shared equally: ${Math.round(plan.perMin * 10) / 10} min each.`} Each person gives up their part of the hour in proportion to how long they covered, so the day still adds up to the shift.</p>
+          <div className="info-card"><Icon name="clock" size={18} /><div><strong>Paid lunch ({Math.round(plan.poolMin)} min)</strong>
+            <p>{lunchMode === 'owner' ? `Goes to ${owner.name} (calls during lunch).` : lunchMode === 'custom' ? 'Split by the minutes you set for each person below.' : `Shared equally: +${Math.round(plan.perMin * 10) / 10} min each.`}{plan.insideMin > 0.5 ? ' The times entered already include the lunch, so that part is taken out of everyone’s time first.' : ''}</p>
             <div className="pill-row" style={{ marginTop: 8 }}>
               <button className={`outline-button ${lunchMode === 'equal' ? 'active' : ''}`} onClick={() => setLunch('equal')}>Equal</button>
               {owner && <button className={`outline-button ${lunchMode === 'owner' ? 'active' : ''}`} onClick={() => setLunch('owner')}>All to {owner.name}</button>}
@@ -228,7 +229,7 @@ export function DailyLog({ date, setDate, today }) {
                       <>
                         <div className="calculation"><span><Icon name="clock" size={16} /> Paid time</span><strong>{hrs > 0 ? `${hm(paid)} · ${$(paid * rate)}` : '—'}</strong></div>
                         {hrs > 0 && (lunchMin > 0 || lunchOut > 0) && <p className="muted-text" style={{ marginTop: 6 }}>{plan.inside
-                          ? `${hm(hrs)} covered − ${Math.round(lunchOut * 10) / 10} min lunch + ${Math.round(lunchMin * 10) / 10} min lunch share${f.lunch_min !== '' ? ' (set by hand)' : ''}`
+                          ? `${hm(hrs)}${lunchOut > 0.05 ? ` − ${Math.round(lunchOut * 10) / 10} min lunch already in the times` : ' worked'} + ${Math.round(lunchMin * 10) / 10} min lunch${f.lunch_min !== '' ? ' (set by hand)' : ''}`
                           : `${hm(hrs)} worked + ${Math.round(lunchMin * 10) / 10} min paid lunch${f.lunch_min !== '' ? ' (given by hand)' : ' share'}`}</p>}
                         {Number(f.ot_hours) > 0 && <div className="ot-inline"><div><span>OT</span><strong>{form.ot_position === 'before' ? 'Before' : 'After'} shift · {hm(Number(f.ot_hours))}</strong></div><span className="provisional">{day.otPool.final ? 'Final' : 'Provisional'}</span></div>}
                         <div style={{ marginTop: 10 }}><Field label={`OT hours after the shift${day.offer?.cap_today != null ? ` (up to ${day.offer.cap_today}h today)` : ''}`}><input type="number" min="0" step="0.25" disabled={off} value={f.ot_hours} onChange={(e) => setW(w.id, { ot_hours: e.target.value })} /></Field></div>

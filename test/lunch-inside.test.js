@@ -57,12 +57,33 @@ test('lunch given to ate (she does the AR calls) — whether or not she covered 
   await assert.rejects(call('PUT', '/day/2026-11-10', { entries: [w(id.Me, '16:00', '20:30', { lunch_min: 50 }), w(id.Sib, '20:30', '01:00', { lunch_min: 50 })] }), /More lunch was given out/)
 })
 
+test('work hours only (lunch not in the times): the lunch hour is ADDED and shared', async () => {
+  const { call, id } = await setup()
+  // typed as hours: 4h + 4h = 8h of work → +30 min each
+  let r = await call('PUT', '/day/2026-11-07', { entries: [w(id.Me, '16:00', '20:00'), w(id.Sib, '20:00', '00:00')] })
+  assert.deepEqual(r.warnings, []); assert.deepEqual(await hours(call, '2026-11-07'), { Me: 4.5, Sib: 4.5 })
+  // one worker did the whole 8h; the other did not work but is given the lunch hour → no lunch for the worker
+  await call('PUT', '/day/2026-11-08', { entries: [w(id.Me, '16:00', '00:00'), { worker_id: id.Sib, status: 'not_worked', lunch_min: 60 }] })
+  assert.deepEqual(await hours(call, '2026-11-08'), { Me: 8, Sib: 1 })
+  // 4h + 4h, lunch to ate (calls)
+  await call('PUT', '/day/2026-11-09', { entries: [w(id.Me, '16:00', '20:00'), w(id.Sib, '20:00', '00:00'), { worker_id: id.Ate, status: 'not_worked', lunch_min: 60 }] })
+  assert.deepEqual(await hours(call, '2026-11-09'), { Me: 4, Sib: 4, Ate: 1 })
+  // alone, 8h of work → 9 paid
+  await call('PUT', '/day/2026-11-10', { entries: [w(id.Me, '16:00', '00:00')] })
+  assert.deepEqual(await hours(call, '2026-11-10'), { Me: 9 })
+  // times with the lunch break as a gap (4–8pm, lunch, 9pm–1am): no warning, 4.5 each
+  r = await call('PUT', '/day/2026-11-11', { entries: [w(id.Me, '16:00', '20:00'), w(id.Sib, '21:00', '01:00')] })
+  assert.deepEqual(r.warnings, []); assert.deepEqual(await hours(call, '2026-11-11'), { Me: 4.5, Sib: 4.5 })
+})
+
 test('a day that does not match the month\'s shift, or has a hole, is flagged', async () => {
   const { call, id } = await setup()
-  let r = await call('PUT', '/day/2026-11-07', { entries: [w(id.Me, '16:00', '20:00'), w(id.Sib, '21:00', '01:00')] })
-  assert.deepEqual(r.warnings.map((x) => x.type).sort(), ['gap', 'shift'])
-  r = await call('PUT', '/day/2026-11-08', { entries: [w(id.Me, '16:00', '00:00')] })
-  assert.deepEqual(r.warnings, [{ type: 'shift', logged: 480, shift: 540 }])
+  let r = await call('PUT', '/day/2026-11-07', { entries: [w(id.Me, '16:00', '19:00'), w(id.Sib, '21:00', '01:00')] })
+  assert.deepEqual(r.warnings.map((x) => x.type).sort(), ['gap', 'shift'])          // 2h hole, only 7h + 1h lunch
+  r = await call('PUT', '/day/2026-11-08', { entries: [w(id.Me, '16:00', '22:00')] })
+  assert.deepEqual(r.warnings, [{ type: 'shift', logged: 420, shift: 540 }])          // 6h + 1h lunch of a 9h shift
+  r = await call('PUT', '/day/2026-11-09', { entries: [w(id.Me, '16:00', '03:00')] })
+  assert.equal(r.warnings[0].type, 'shift')                                            // longer than the shift (OT goes in its own field)
   // the shift moved to 5pm–2am for December: a 5pm–2am day is fine there
   await call('PUT', '/schedule/2026-12', { shift_start: '17:00', shift_end: '02:00' })
   r = await call('PUT', '/day/2026-12-05', { entries: [w(id.Me, '17:00', '02:00')] })
