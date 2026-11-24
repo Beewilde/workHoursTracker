@@ -75,7 +75,7 @@ npm run ios            # opens Xcode
 
 - **Shift:** set per month in Settings (default 4pm–1am = 9 paid hours, lunch included). New months copy the last one.
 - **Logging a day:** enter who covered which part of the shift, as times or with **Enter hours only** (times are filled in from the shift start, in order). The parts should add up to the shift. If they don't, the app warns you.
-- **Lunch hour:** it's inside the shift, so a day never pays more than the shift. By default it's **shared equally** by that day's workers. Each person gives up their part of the hour in proportion to how long they covered and gets an equal share back, so 4:00–8:30 + 8:30–1:00 pays 4h 30m each. On any day you can switch it to **All to <owner>** (ate, when she does the calls) or **Custom** minutes per person.
+- **Lunch hour:** the shift pays 8 hours of work + 1 paid lunch hour. Enter **work hours** (4h + 4h), and the lunch is added on top: +30 min each by default. If you enter **times that include the lunch** (4:00–8:30 + 8:30–1:00), the app sees that and takes the hour out first, so it's never paid twice. On any day you can give the lunch to **one person** instead (e.g. ate, when she does the calls) or set **custom** minutes. Whoever gets it, nobody else does.
 - **Account owner:** set under Workers & Rates. Review bonuses go to the owner by default, and the owner gets the one-tap lunch option. The owner can also log shift hours like anyone else.
 - **OT:** log it on any day, as after-shift hours or as **RD OT** on a rest day. Everyone's OT is added up:
   - OT on days covered by an **OT offer that has its own minimum** counts toward that offer.

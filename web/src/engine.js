@@ -62,10 +62,11 @@ export function createEngine(state, save = () => {}) {
   const paidUsing = (offerId) => S.entries.filter((e) => e.ot_offer_id === offerId && e.ot_hours > 0 && isPaid(e.date.slice(0, 7), e.worker_id))
   const offerFor = (date) => S.offers.find((o) => o.start_date <= date && o.end_date >= date)
   const entriesOn = (date) => S.entries.filter((e) => e.date === date)
-  const lunchCfg = () => ({ auto: S.settings.lunch_auto, minutes: S.settings.lunch_minutes, threshold: S.settings.lunch_threshold, from: S.settings.lunch_from || null,
-    inside: !!S.settings.lunch_inside, insideFrom: S.settings.lunch_inside_from || null })
+  // months: which months' shift lengths to include (the lunch rule needs them; plain data so it can be copied)
+  const lunchCfg = (...months) => ({ auto: S.settings.lunch_auto, minutes: S.settings.lunch_minutes, threshold: S.settings.lunch_threshold, from: S.settings.lunch_from || null,
+    inside: !!S.settings.lunch_inside, insideFrom: S.settings.lunch_inside_from || null, shiftByMonth: Object.fromEntries(months.map((m) => [m, shiftMin(m)])) })
   const monthCfg = (m) => schedule(m)
-  const report = (month, workers = S.workers) => monthReport({ month, workers, rates: ratesBy(), entries: S.entries, offers: S.offers, bonuses: S.bonuses, today: today(), lunch: lunchCfg(), accountDays: S.accountDays, monthCfg })
+  const report = (month, workers = S.workers) => monthReport({ month, workers, rates: ratesBy(), entries: S.entries, offers: S.offers, bonuses: S.bonuses, today: today(), lunch: lunchCfg(month), accountDays: S.accountDays, monthCfg })
   const shiftMin = (m) => { const c = schedule(m); return spanMin(c.shift_start, c.shift_end) }
   const isLeave = (date) => S.accountDays[date]?.day_off === 'leave'
   // Lunch rule 2 = PAID lunch added to the workers' time (8 worked hours -> lunch applies).
@@ -125,7 +126,7 @@ export function createEngine(state, save = () => {}) {
       account: S.accountDays[date] || { date, company_hours: null, lunch_hours: null, note: null, day_off: null },
       coverage: cov,
       offer: offer && { ...offer, stats: stats[offer.id], usedHours: entries.reduce((s, e) => s + (e.ot_hours || 0), 0), cap_today: capFor(offer, date) },
-      presets: S.settings.presets, lunchSettings: lunchCfg(), shiftStart: sch.shift_start || '16:00',
+      presets: S.settings.presets, lunchSettings: lunchCfg(month), shiftStart: sch.shift_start || '16:00',
     }
   }
 
@@ -172,15 +173,17 @@ export function createEngine(state, save = () => {}) {
       warnings.push({ type: 'overlap', minutes: cov.overlap })
     }
     const acctOverride = body.account ? body.account.lunch_hours : S.accountDays[date]?.lunch_hours
-    const lp = lunchPlan(covInput, { ...lunchCfg(), override: acctOverride, date })
+    const lp = lunchPlan(covInput, { ...lunchCfg(month), override: acctOverride, date })
     const leave = (body.account ? body.account.day_off : S.accountDays[date]?.day_off) === 'leave'
     if (leave) need(!covInput.some((e) => e.status === 'worked' || e.status === 'training' || e.status === 'rdot'), 'This day is marked as leave (no work). Remove the leave mark to log hours.')
     if (lp.inside) {
       // the logged times already contain the lunch hour: any gap is a real hole, and the day should match the shift
       need(!lp.overGiven, `More lunch was given out (${Math.round(lp.givenMin)} min) than the ${Math.round(lp.poolMin)} min lunch of this day`)
-      if (cov.status === 'gap' && cov.gap > 0.5) warnings.push({ type: 'gap', minutes: Math.round(cov.gap) })
-      const shift = shiftMin(month), logged = Math.round(cov.hours * 60)
-      if (logged > 0 && Math.abs(logged - shift) > 1) warnings.push({ type: 'shift', logged, shift })
+      // a gap up to the lunch that is NOT inside the times is the lunch break itself
+      const unexplained = cov.gap - (lp.poolMin - lp.insideMin)
+      if (cov.status === 'gap' && unexplained > 0.5) warnings.push({ type: 'gap', minutes: Math.round(unexplained) })
+      const shift = shiftMin(month), worked = Math.round(cov.hours * 60), paid = Math.round(worked - lp.insideMin + lp.poolMin)
+      if (worked > 0 && (paid < shift - 1 || worked > shift + 1)) warnings.push({ type: 'shift', logged: paid, shift })
     } else {
       // older rule: the lunch is a gap in the times; a gap of up to the lunch length is the lunch itself
       const unexplainedGap = Math.max(0, cov.gap - lp.poolMin)
@@ -473,7 +476,7 @@ export function createEngine(state, save = () => {}) {
       return structuredClone({
         month, workers, rates: ratesBy(), entries: S.entries, offers: S.offers, bonuses: S.bonuses, today: today(),
         paid: Object.fromEntries(workers.filter((w) => S.paid[`${month}|${w.id}`]).map((w) => [w.id, paidAt(S.paid[`${month}|${w.id}`])])),
-        accountDays: S.accountDays, lunch: lunchCfg(), months: Object.fromEntries([month].map((m) => [m, schedule(m)])),
+        accountDays: S.accountDays, lunch: lunchCfg(month), months: Object.fromEntries([month].map((m) => [m, schedule(m)])),
       })
     },
     backup() {

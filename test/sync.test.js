@@ -30,7 +30,7 @@ test('a worker and a day logged on one phone appear on the other', async () => {
   assert.equal((await B.run()).state, 'ok')
   assert.equal(B.state.workers[0].name, 'Alex')
   assert.equal(B.state.entries[0].time_out, '20:30')
-  assert.equal((await B.call('GET', '/summary/2026-11')).totals.total, 22.5)
+  assert.equal((await B.call('GET', '/summary/2026-11')).totals.total, 27.5)   // 4h30 + the 1h lunch (alone that day)
 })
 
 test('nothing is re-uploaded once both phones agree', async () => {
@@ -95,7 +95,7 @@ test('marking paid syncs, and a change the server refuses is rolled back on the 
   await B.call('PUT', '/day/2026-10-02', { entries: [day(w, '16:00', '22:00')] })
   await A.call('PUT', `/paid/2026-10/${w}`, { paid: true })
   await A.run()
-  assert.equal(srv.db.payouts.length, 1); assert.equal(srv.db.payouts[0].total, 22.5)
+  assert.equal(srv.db.payouts.length, 1); assert.equal(srv.db.payouts[0].total, 27.5)
   // the real database's trigger refuses edits in a paid month; do the same here
   srv.refuse = (t, r) => t === 'entries' && srv.db.payouts.some((p) => p.worker_id === r.worker_id && r.date.startsWith(p.month)) ? 'Month 2026-10 is marked paid' : null
   const st = await B.run()
