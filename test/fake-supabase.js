@@ -8,7 +8,9 @@ export function fakeServer() {
   const tick = () => new Date((clock += 1000)).toISOString()
   const db = { households: [], tombstones: [] }
   for (const t of Object.keys(TABLES)) db[t] = []
-  const pk = (t) => (t === 'households' ? ['id'] : t === 'tombstones' ? ['household_id', 'tbl', 'key'] : TABLES[t].key)
+  // the real primary keys (account_days and schedules include household_id)
+  const PK = { households: ['id'], tombstones: ['household_id', 'tbl', 'key'], account_days: ['household_id', 'date'], schedules: ['household_id', 'month'] }
+  const pk = (t) => PK[t] || TABLES[t].key
   const keyStr = (t, r) => TABLES[t].key.map((k) => String(r[k])).join('|')
   const srv = { db, refuse: null, requests: 0 }
 
@@ -19,7 +21,7 @@ export function fakeServer() {
     gt(c, v) { this.filters.push((r) => r[c] > v); return this }
     order(c) { this.ord = c; return this }
     range(a, b) { this.rangeV = [a, b]; return this }
-    upsert(rows) { this.op = 'upsert'; this.rows = rows; return this }
+    upsert(rows, opts = {}) { this.op = 'upsert'; this.rows = rows; this.onConflict = opts.onConflict; return this }
     update(v) { this.op = 'update'; this.val = v; return this }
     delete() { this.op = 'delete'; return this }
     match(r) { return this.filters.every((f) => f(r)) }
@@ -34,7 +36,10 @@ export function fakeServer() {
         return { data: out, error: null }
       }
       if (this.op === 'upsert') {
-        for (const r of this.rows) { const msg = srv.refuse?.(this.t, r); if (msg) return { data: null, error: { message: msg } } }
+        // like Postgres: ON CONFLICT must name exactly a unique key of the table
+        if (this.onConflict && [...this.onConflict.split(',')].sort().join() !== [...pk(this.t)].sort().join())
+          return { data: null, error: { code: '42P10', message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification' } }
+        for (const r of this.rows) { const msg = srv.refuse?.(this.t, r); if (msg) return { data: null, error: { code: 'P0409', message: msg } } }
         for (const r of this.rows) {
           const i = tbl.findIndex((x) => pk(this.t).every((k) => String(x[k]) === String(r[k])))
           const row = { ...(i >= 0 ? tbl[i] : {}), ...structuredClone(r), updated_at: tick() }

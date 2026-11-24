@@ -168,3 +168,20 @@ test('a month that only sets rest days pays the same on every phone (no empty sh
   assert.equal((await B.call('GET', '/schedule/2026-10')).ot_min, (await A.call('GET', '/schedule/2026-10')).ot_min)
   assert.equal((await B.call('GET', '/schedule/2026-10')).shift_start, '16:00')
 })
+
+test('a technical upload error keeps the change on the phone (only a real refusal rolls it back)', async () => {
+  const srv = fakeServer(); srv.addHousehold(HH)
+  const A = phone(srv)
+  await A.call('PUT', '/schedule/2026-11', { weekdays: [2, 3] })
+  await A.call('PUT', '/day/2026-11-06', { account: { day_off: 'leave', note: 'ate on leave' }, entries: [] })
+  srv.refuse = (t) => (t === 'schedules' || t === 'account_days' ? 'some technical problem' : null)   // no refusal code
+  const real = srv.client.from
+  srv.client.from = (t) => { const q = real(t); const up = q.upsert.bind(q); q.upsert = (rows, o) => { const r = up(rows, o); r.run = () => ({ data: null, error: { code: '42P10', message: 'technical' } }); return r }; return q }
+  const st = await A.run()
+  assert.equal(st.state, 'warning')
+  assert.deepEqual(A.state.schedules['2026-11'].weekdays, [2, 3])                 // still here
+  assert.equal(A.state.accountDays['2026-11-06'].note, 'ate on leave')
+  srv.client.from = real; srv.refuse = null
+  assert.equal((await A.run()).state, 'ok')                                         // goes up once fixed
+  assert.equal(srv.db.schedules.length, 1); assert.equal(srv.db.account_days.length, 1)
+})
