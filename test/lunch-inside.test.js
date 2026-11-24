@@ -154,3 +154,18 @@ test('records from before the switch keep the older "lunch added on top" numbers
   assert.equal((await call('GET', '/summary/2025-03')).totals.regularHours, 9)          // 8 h worked + 1 h lunch, as before
   assert.equal(e.state.settings.lunch_inside_from, new Intl.DateTimeFormat('en-CA', { timeZone: e.state.settings.timezone }).format(new Date()))
 })
+
+test('pesos: a USD→PHP rate is shown next to the pay, and a paid month keeps its rate', async () => {
+  const { call, id } = await setup()
+  await call('PUT', '/day/2026-10-05', { entries: [w(id.Me, '16:00', '20:00'), w(id.Sib, '20:00', '00:00')] })
+  await assert.rejects(call('PUT', '/settings', { php_rate: 0.5 }), /Peso rate/)
+  await call('PUT', '/settings', { php_rate: 58.5, php_rate_date: '2026-10-31' })
+  assert.equal((await call('GET', '/day/2026-10-05')).phpRate, 58.5)
+  await call('PUT', `/paid/2026-10/${id.Me}`, { paid: true })
+  await call('PUT', '/settings', { php_rate: 60 })                                    // the rate moves later
+  const sum = await call('GET', '/summary/2026-10')
+  const rate = Object.fromEntries(sum.rows.map((r) => [r.worker.name, r.phpRate]))
+  assert.deepEqual([rate.Me, rate.Sib, sum.phpRate], [58.5, 60, 60])                  // Me was paid at 58.5
+  await call('PUT', '/settings', { php_rate: '' })
+  assert.equal((await call('GET', '/summary/2026-10')).phpRate, null)                  // blank = pesos hidden
+})

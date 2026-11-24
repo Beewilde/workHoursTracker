@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { api, useLoad, useToast, $, h2, addDays, fmtDate } from './lib.js'
+import { api, useLoad, useToast, $, peso, h2, addDays, fmtDate } from './lib.js'
 import { Page, Icon, Avatar, Metric, Field, Loading, ErrorBox, StatusLabel, useShell } from './ui.jsx'
 import { spanMin, toMin, coverage, deriveOT, fmtMin, lunchPlan, paidHours } from '../../shared/calc.js'
 import { parseHours, parseDateInput } from '../../shared/input.js'
@@ -227,7 +227,7 @@ export function DailyLog({ date, setDate, today }) {
                       </>
                     ) : (
                       <>
-                        <div className="calculation"><span><Icon name="clock" size={16} /> Paid time</span><strong>{hrs > 0 ? `${hm(paid)} · ${$(paid * rate)}` : '—'}</strong></div>
+                        <div className="calculation"><span><Icon name="clock" size={16} /> Paid time</span><strong>{hrs > 0 ? `${hm(paid)} · ${$(paid * rate)}${day.phpRate ? ` · ${peso(paid * rate, day.phpRate)}` : ''}` : '—'}</strong></div>
                         {hrs > 0 && (lunchMin > 0 || lunchOut > 0) && <p className="muted-text" style={{ marginTop: 6 }}>{plan.inside
                           ? `${hm(hrs)}${lunchOut > 0.05 ? ` − ${Math.round(lunchOut * 10) / 10} min lunch already in the times` : ' worked'} + ${Math.round(lunchMin * 10) / 10} min lunch${f.lunch_min !== '' ? ' (set by hand)' : ''}`
                           : `${hm(hrs)} worked + ${Math.round(lunchMin * 10) / 10} min paid lunch${f.lunch_min !== '' ? ' (given by hand)' : ' share'}`}</p>}

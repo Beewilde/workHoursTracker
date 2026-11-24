@@ -82,6 +82,7 @@ npm run ios            # opens Xcode
   - All other OT counts toward the **month's minimum** (Settings → this month).
   - Minimum reached → **every** OT hour in that group is paid the OT rate. Below it → the regular rate. OT stays "provisional" until the offer or month is over.
 - **Leave:** "Mark as leave (no work)" on the day. Nobody is paid, and it doesn't count as a missing day.
+- **Pesos:** Settings → Peso (PHP). Type the rate you got, or tap **Get today's rate** (the daily reference rate from frankfurter.dev). Pay is still worked out in dollars; pesos are shown next to it in the Daily Log, the Month Summary and the Excel Summary sheet. A month marked paid keeps the rate it was paid at.
 - **Older records** (before this version) keep the old rule, where the lunch was added on top of the times, so their totals don't change.
 
 ## How sync behaves (so nothing surprises you)

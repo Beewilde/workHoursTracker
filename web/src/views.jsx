@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { api, useLoad, useToast, $, h2, addDays, addMonths, fmtDate, monthLabel, downloadExport } from './lib.js'
+import { api, useLoad, useToast, $, peso, h2, addDays, addMonths, fmtDate, monthLabel, downloadExport } from './lib.js'
 import { Page, Icon, Avatar, Metric, Field, Modal, Loading, ErrorBox, StatusLabel, MonthNav, useShell } from './ui.jsx'
 import { T, hm } from './daily.jsx'
 
@@ -85,7 +85,7 @@ export function SummaryPage({ month, setMonth }) {
     <Page title="Month Summary" eyebrow={monthLabel(month)} narrow={false}>
       <MonthNav month={month} setMonth={setMonth} />
       <div className="summary-hero">
-        <div><p className="eyebrow">Grand total payout</p><h2>{$(t.total)}</h2><span>Across {data.rows.filter((r) => r.worker.active).length} active workers</span></div>
+        <div><p className="eyebrow">Grand total payout</p><h2>{$(t.total)}</h2>{data.phpRate && <p style={{ margin: '2px 0 4px', fontSize: 18, fontWeight: 600 }}>≈ {peso(data.rows.reduce((s, r) => s + r.total * (r.phpRate || 0), 0) / data.phpRate, data.phpRate)}</p>}<span>Across {data.rows.filter((r) => r.worker.active).length} active workers{data.phpRate ? ` · $1 = ₱${data.phpRate}${data.phpRateDate ? ` (${data.phpRateDate})` : ''}` : ''}</span></div>
         <button className="light-button" onClick={() => downloadExport(month).catch((e) => toast(e.message, 'error'))}><Icon name="download" size={17} /> Export month</button>
       </div>
       <div className="summary-metrics">
@@ -103,7 +103,8 @@ export function SummaryPage({ month, setMonth }) {
             <div className="worker-identity"><Avatar w={r.worker} small /><div><strong>{r.worker.name}</strong><small>{r.shifts} {r.shifts === 1 ? "shift" : "shifts"} · {hm(r.regularHours) || "0h"}</small></div></div>
             <span className="desktop-cell">{r.shifts}</span><span className="desktop-cell">{$(r.regularPay)}</span>
             <span className="desktop-cell">{$(r.otPay)}</span><span className="desktop-cell">{$(r.bonusTotal)}</span>
-            <strong className="row-total" title={r.changedSincePaid ? `Paid ${$(r.paidTotal)}; the settings now give ${$(r.total)}` : undefined}>{r.changedSincePaid ? <>{$(r.paidTotal)} <small className="muted-text">now {$(r.total)}</small></> : $(r.total)}</strong>
+            <strong className="row-total" title={r.changedSincePaid ? `Paid ${$(r.paidTotal)}; the settings now give ${$(r.total)}` : undefined}>{r.changedSincePaid ? <>{$(r.paidTotal)} <small className="muted-text">now {$(r.total)}</small></> : $(r.total)}
+              {r.phpRate ? <small className="muted-text" style={{ display: 'block', fontWeight: 500 }}>{peso(r.paidTotal ?? r.total, r.phpRate)}</small> : null}</strong>
             <button className={`payment-button ${r.paidAt ? 'paid' : ''}`} onClick={() => toggle(r)}>{r.paidAt ? <><Icon name="lock" size={14} /> Paid</> : 'Mark paid'}</button>
           </div>
         ))}
