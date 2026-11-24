@@ -3,6 +3,7 @@ import { api, useLoad, useToast, $, peso, h2, addDays, fmtDate } from './lib.js'
 import { Page, Icon, Avatar, Metric, Field, Loading, ErrorBox, StatusLabel, useShell } from './ui.jsx'
 import { spanMin, toMin, coverage, deriveOT, fmtMin, lunchPlan, paidHours } from '../../shared/calc.js'
 import { parseHours, parseDateInput } from '../../shared/input.js'
+import { useSyncStatus, canManage } from './family.jsx'
 
 export const T = (t) => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` }
 const short = (t) => { const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')}` }
@@ -112,6 +113,7 @@ export function DailyLog({ date, setDate, today }) {
   const [custom, setCustom] = useState({})
   const [more, setMore] = useState({})
   const toast = useToast()   // hooks must run before the early returns below
+  const manage = canManage(useSyncStatus())   // members can add new logs, not change saved ones
   const [hoursOnly, setHoursOnlyRaw] = useState(() => { try { return localStorage.getItem('wh-hours-only') === '1' } catch { return false } })
   const setHoursOnly = (v) => { setHoursOnlyRaw(v); try { localStorage.setItem('wh-hours-only', v ? '1' : '0') } catch { /* ignore */ } }
   const eyebrow = fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric' })
@@ -131,6 +133,7 @@ export function DailyLog({ date, setDate, today }) {
   // paid regular time vs the shift (work hours + the paid lunch, however the day was written down)
   const covered = Math.round(regH * 60)
   const leave = form.account.day_off === 'leave'
+  const savedLocked = !manage && day.workers.some((w) => w.entry)          // a member can't change what's already saved
   const setLeave = (on) => setForm({ ...form, account: { ...form.account, day_off: on ? 'leave' : null }, w: on ? Object.fromEntries(Object.entries(form.w).map(([k, v]) => [k, { ...v, status: v.status === 'worked' || v.status === 'training' || v.status === 'rdot' ? '' : v.status }])) : form.w })
   // lunch split presets: equal (automatic), all to the owner, or custom minutes per person
   const lunchMode = owner && Number(form.w[owner.id]?.lunch_min) >= plan.poolMin - 0.01 && plan.poolMin > 0 ? 'owner' : rows.some((r) => r.f.lunch_min !== '' && r.f.lunch_min != null) ? 'custom' : 'equal'
@@ -155,7 +158,7 @@ export function DailyLog({ date, setDate, today }) {
           {!leave && !day.isRestDay && <div className="progress-track"><span style={{ width: `${Math.min(100, (covered / (day.shift.minutes || 1)) * 100)}%` }} /></div>}
           <div className="pill-row" style={{ marginTop: 12 }}>
             <button className="outline-button" onClick={() => setHoursOnly(!hoursOnly)}>{hoursOnly ? 'Enter times instead' : 'Enter hours only'}</button>
-            {!day.isRestDay && <button className="outline-button" onClick={() => setLeave(!leave)}>{leave ? 'Not leave — log work' : 'Mark as leave (no work)'}</button>}
+            {!day.isRestDay && !savedLocked && <button className="outline-button" onClick={() => setLeave(!leave)}>{leave ? 'Not leave — log work' : 'Mark as leave (no work)'}</button>}
           </div>
         </section>
         {!leave && !day.isRestDay && covered > 0 && Math.abs(covered - day.shift.minutes) > 1 && plan.inside && (
@@ -170,14 +173,14 @@ export function DailyLog({ date, setDate, today }) {
               : p.final ? `Only ${h2(p.total)} of ${p.min}h was reached, so OT ${p.kind === 'offer' ? 'in this offer' : 'this month'} is paid at the regular rate.`
               : `${h2(p.total)} of ${p.min}h so far, everyone together. Shown at ${$(p.rate)}/h for now; if ${h2(p.remaining)}h more isn’t reached by the end of the ${p.kind === 'offer' ? 'offer' : 'month'}, all of it drops to the regular rate.`}</p>
             {p.min > 0 && <div className="progress-track" style={{ marginTop: 8 }}><span style={{ width: pct + '%' }} /></div>}
-            {day.offer && day.offer.cap_today != null && <div className="form-grid" style={{ marginTop: 10, maxWidth: 260 }}><Field label="OT available today (hours)"><input type="number" min="0.25" step="0.25" key={date + ':' + day.offer.cap_today} defaultValue={day.offer.cap_today} onBlur={(e) => e.target.value !== String(day.offer.cap_today) && saveCap(e.target.value)} /></Field></div>}</div></div>) })()}
+            {day.offer && day.offer.cap_today != null && <div className="form-grid" style={{ marginTop: 10, maxWidth: 260 }}><Field label="OT available today (hours)"><input disabled={!manage} type="number" min="0.25" step="0.25" key={date + ':' + day.offer.cap_today} defaultValue={day.offer.cap_today} onBlur={(e) => e.target.value !== String(day.offer.cap_today) && saveCap(e.target.value)} /></Field></div>}</div></div>) })()}
         {!leave && plan.inside && plan.poolMin > 0 && (
           <div className="info-card"><Icon name="clock" size={18} /><div><strong>Paid lunch ({Math.round(plan.poolMin)} min)</strong>
             <p>{lunchMode === 'owner' ? `Goes to ${owner.name} (calls during lunch).` : lunchMode === 'custom' ? 'Split by the minutes you set for each person below.' : `Shared equally: +${Math.round(plan.perMin * 10) / 10} min each.`}{plan.insideMin > 0.5 ? ' The times entered already include the lunch, so that part is taken out of everyone’s time first.' : ''}</p>
             <div className="pill-row" style={{ marginTop: 8 }}>
-              <button className={`outline-button ${lunchMode === 'equal' ? 'active' : ''}`} onClick={() => setLunch('equal')}>Equal</button>
-              {owner && <button className={`outline-button ${lunchMode === 'owner' ? 'active' : ''}`} onClick={() => setLunch('owner')}>All to {owner.name}</button>}
-              <button className={`outline-button ${lunchMode === 'custom' ? 'active' : ''}`} onClick={() => { setLunch('custom'); setMore(Object.fromEntries(rows.map((r) => [r.w.id, true]))) }}>Custom</button>
+              <button disabled={savedLocked} className={`outline-button ${lunchMode === 'equal' ? 'active' : ''}`} onClick={() => setLunch('equal')}>Equal</button>
+              {owner && <button disabled={savedLocked} className={`outline-button ${lunchMode === 'owner' ? 'active' : ''}`} onClick={() => setLunch('owner')}>All to {owner.name}</button>}
+              <button disabled={savedLocked} className={`outline-button ${lunchMode === 'custom' ? 'active' : ''}`} onClick={() => { setLunch('custom'); setMore(Object.fromEntries(rows.map((r) => [r.w.id, true]))) }}>Custom</button>
             </div>
             {plan.overGiven && <p className="warning-text" style={{ marginTop: 6 }}>More lunch given out ({Math.round(plan.givenMin)} min) than the {Math.round(plan.poolMin)} min there is.</p>}</div></div>
         )}
@@ -185,7 +188,7 @@ export function DailyLog({ date, setDate, today }) {
         {!leave && <><div className="section-heading"><div><h2>Who worked</h2><p>{hoursOnly ? 'Type each person’s hours; times are filled in from the shift start, in order.' : 'Pick each person’s part of the shift. Times include the lunch hour.'}</p></div><span className="live-dot">Live totals</span></div>
         <div className="worker-grid">
           {rows.map(({ w, f }) => {
-            const timed = isTimed(f), rdot = f.status === 'rdot', off = w.paid
+            const timed = isTimed(f), rdot = f.status === 'rdot', saved = !manage && !!w.entry, off = w.paid || saved
             const hrs = (timed || rdot) && f.time_in && f.time_out ? spanMin(f.time_in, f.time_out) / 60 : 0
             const paid = rdot ? 0 : paidHours(f, plan), lunchMin = rdot ? 0 : plan.minFor(f), lunchOut = rdot ? 0 : plan.deductFor(f)
             const rate = f.rate_override !== '' ? Number(f.rate_override) : w.rate
@@ -259,7 +262,8 @@ export function DailyLog({ date, setDate, today }) {
                 )}
                 {f.status === 'training' && <div className="status-note training" style={{ marginTop: 10 }}><Icon name="briefcase" size={18} /><div><strong>Paid training</strong><p>Training hours are paid at the regular rate.</p></div></div>}
                 {!f.status && <button className="quick-worked" disabled={off} onClick={() => setW(w.id, { status: 'worked' })}><Icon name="plus" size={17} /> Start logging</button>}
-                {off && <p className="muted-text" style={{ marginTop: 10 }}><Icon name="lock" size={13} /> This month is marked paid, so {w.name}’s entries are locked.</p>}
+                {w.paid && <p className="muted-text" style={{ marginTop: 10 }}><Icon name="lock" size={13} /> This month is marked paid, so {w.name}’s entries are locked.</p>}
+                {!w.paid && saved && <p className="muted-text" style={{ marginTop: 10 }}><Icon name="lock" size={13} /> Saved. Only the organization owner can change it — tell them if something is wrong.</p>}
               </article>
             )
           })}

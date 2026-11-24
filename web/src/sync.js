@@ -188,8 +188,11 @@ export function createSync({ client, getState, persist, meta, saveMeta, now = ()
       const vals = k.split('|')
       let qb = q(t).delete().eq('household_id', hh())
       TABLES[t].key.forEach((c, i) => (qb = qb.eq(c, vals[i])))
-      const { error } = await qb
-      if (error) await revert(t, k, error); else delete meta.base[t][k]
+      const { data, error } = await qb.select()
+      if (error) return revert(t, k, error)
+      // the database says nothing when its rules stop a delete: if the row is still there, it was refused
+      if (!data?.length && await fetchRow(t, k)) return revert(t, k, { code: '42501', message: 'Only the organization owner can remove this.' })
+      delete meta.base[t][k]
     }
     // un-marking "paid" goes first, so edits to that month are allowed afterwards
     for (const k of dels.payouts) await del('payouts', k)
@@ -209,8 +212,14 @@ export function createSync({ client, getState, persist, meta, saveMeta, now = ()
     for (const t of ['ot_offers', 'workers']) for (const k of dels[t]) await del(t, k)
     const sfp = JSON.stringify(settingsOf(S))
     if (sfp !== meta.settingsFp) {
-      const { error } = await q('households').update({ settings: settingsOf(S), timezone: S.settings.timezone }).eq('id', hh())
-      if (error) rejected.push({ table: 'households', key: hh(), message: error.message }); else meta.settingsFp = sfp
+      const { data, error } = await q('households').update({ settings: settingsOf(S), timezone: S.settings.timezone }).eq('id', hh()).select('id')
+      if (!error && data?.length) meta.settingsFp = sfp
+      else {
+        // refused (only the owner may change the shared settings): take the organization's settings back
+        rejected.push({ table: 'households', key: hh(), message: error?.message || 'Only the organization owner can change the settings.' })
+        const [house] = must(await q('households').select('*').eq('id', hh()))
+        if (house) { S.settings = { ...S.settings, ...sortKeys(house.settings || {}) }; meta.settingsFp = JSON.stringify(settingsOf(S)); reverted = true }
+      }
     }
     return { rejected, reverted }
   }

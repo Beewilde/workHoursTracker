@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { api, useLoad, useToast, $, peso, h2, addDays, addMonths, fmtDate, monthLabel, downloadExport } from './lib.js'
 import { Page, Icon, Avatar, Metric, Field, Modal, Loading, ErrorBox, StatusLabel, MonthNav, useShell } from './ui.jsx'
 import { T, hm } from './daily.jsx'
+import { useSyncStatus, canManage } from './family.jsx'
 
 const bind = (s, set, k) => ({ value: s[k] ?? '', onChange: (e) => set({ ...s, [k]: e.target.value }) })
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -76,6 +77,7 @@ export function SummaryPage({ month, setMonth }) {
   const toast = useToast()
   const { data, loading, error, reload } = useLoad(`/summary/${month}`)
   const [unpaidOnly, setUnpaidOnly] = useState(false)
+  const manage = canManage(useSyncStatus())
   if (error) return <Page title="Month Summary" eyebrow={monthLabel(month)} narrow={false}><ErrorBox error={error} /></Page>
   if (loading || !data) return <Page title="Month Summary" eyebrow={monthLabel(month)} narrow={false}><Loading /></Page>
   const t = data.totals
@@ -106,7 +108,7 @@ export function SummaryPage({ month, setMonth }) {
             <span className="desktop-cell">{$(r.otPay)}</span><span className="desktop-cell">{$(r.bonusTotal)}</span>
             <strong className="row-total" title={r.changedSincePaid ? `Paid ${$(r.paidTotal)}; the settings now give ${$(r.total)}` : undefined}>{r.changedSincePaid ? <>{$(r.paidTotal)} <small className="muted-text">now {$(r.total)}</small></> : $(r.total)}
               {r.phpRate ? <small className="muted-text" style={{ display: 'block', fontWeight: 500 }}>{peso(r.paidTotal ?? r.total, r.phpRate)}</small> : null}</strong>
-            <button className={`payment-button ${r.paidAt ? 'paid' : ''}`} onClick={() => toggle(r)}>{r.paidAt ? <><Icon name="lock" size={14} /> Paid</> : 'Mark paid'}</button>
+            <button className={`payment-button ${r.paidAt ? 'paid' : ''}`} disabled={!manage} title={manage ? undefined : 'Only the organization owner can mark paid'} onClick={() => toggle(r)}>{r.paidAt ? <><Icon name="lock" size={14} /> Paid</> : 'Mark paid'}</button>
           </div>
         ))}
       </div>
@@ -132,6 +134,7 @@ export function OffersPage() {
   const { data, loading, error, reload } = useLoad('/offers')
   const [tab, setTab] = useState('active')
   const [edit, setEdit] = useState(null)
+  const manage = canManage(useSyncStatus())
   const header = { title: 'OT Offers', eyebrow: 'Pooled overtime' }
   if (error) return <Page {...header}><ErrorBox error={error} /></Page>
   if (loading || !data) return <Page {...header}><Loading /></Page>
@@ -149,7 +152,7 @@ export function OffersPage() {
       <div className="tabs">
         <button className={tab === 'active' ? 'active' : ''} onClick={() => setTab('active')}>Active</button>
         <button className={tab === 'past' ? 'active' : ''} onClick={() => setTab('past')}>Past offers</button>
-        <button className="primary-button small" onClick={() => setEdit(empty)}><Icon name="plus" size={16} /> Create offer</button>
+        {manage && <button className="primary-button small" onClick={() => setEdit(empty)}><Icon name="plus" size={16} /> Create offer</button>}
       </div>
       {list.length === 0 && <section className="surface"><p className="muted-text">{tab === 'active' ? 'No active OT offers. OT can still be logged on any day; it counts toward the month’s minimum. Create an offer here when an announcement sets its own dates, minimum or rate.' : 'No past offers yet.'}</p></section>}
       {list.map((o) => {
@@ -180,11 +183,11 @@ export function OffersPage() {
               {o.contributions.length === 0 && <p className="muted-text" style={{ paddingTop: 8 }}>No OT logged yet.</p>}
               {o.contributions.map((c) => <div key={c.id}><span><Avatar w={c} small />{c.name}</span><strong>{hm(c.hours)} · {$(c.pay)}</strong></div>)}
             </div>
-            <div className="offer-actions">
+            {manage && <div className="offer-actions">
               <button className="outline-button" onClick={() => setEdit({ ...o })}><Icon name="edit" size={16} /> Edit</button>
               <button className="outline-button" onClick={() => setEdit({ ...o, id: undefined, name: o.name + ' (copy)', start_date: addDays(o.end_date, 1), end_date: addDays(o.end_date, 7) })}>Duplicate</button>
               <button className="outline-button danger" onClick={() => del(o)}><Icon name="trash" size={16} /> Delete</button>
-            </div>
+            </div>}
           </article>
         )
       })}
@@ -258,6 +261,7 @@ export function WorkersPage({ onChange }) {
   const [add, setAdd] = useState(null)
   const [manage, setManage] = useState(null)
   const [rate, setRate] = useState({ effective_from: '', rate: '' })
+  const canEdit = canManage(useSyncStatus())
   const header = { title: 'Workers & Rates', eyebrow: data ? `${data.filter((w) => w.active).length} active workers` : '' }
   if (error) return <Page {...header}><ErrorBox error={error} /></Page>
   if (loading || !data) return <Page {...header}><Loading /></Page>
@@ -265,13 +269,14 @@ export function WorkersPage({ onChange }) {
   const cur = manage && data.find((w) => w.id === manage)
   return (
     <Page {...header}>
-      <button className="primary-button top-action" onClick={() => setAdd({ name: '', rate: 5 })}><Icon name="plus" size={17} /> Add worker</button>
+      {!canEdit && <div className="info-card" style={{ clear: 'both' }}><Icon name="lock" size={18} /><div><strong>Only the organization owner can add workers or change rates</strong></div></div>}
+      {canEdit && <button className="primary-button top-action" onClick={() => setAdd({ name: '', rate: 5 })}><Icon name="plus" size={17} /> Add worker</button>}
       {data.length === 0 && <section className="surface" style={{ clear: 'both' }}><p className="muted-text">Add the people who share the company account and split its hours.</p></section>}
       {data.map((w) => (
         <article className={`worker-management ${w.active ? '' : 'inactive'}`} key={w.id}>
           <div className="worker-identity"><Avatar w={w} /><div><h3>{w.name}</h3><p>{w.active ? <><span className="online-dot" /> Active</> : 'Inactive'}{w.owner ? ' · Account owner' : ''}</p></div></div>
           <div className="rate-box"><span>Hourly rate</span><strong>{$(w.rate)}</strong><small>{w.rates.length > 1 ? `${w.rates.length} rates on file` : 'No changes yet'}</small></div>
-          <button className="outline-button" onClick={() => { setManage(w.id); setRate({ effective_from: '', rate: '' }) }}>Manage</button>
+          {canEdit && <button className="outline-button" onClick={() => { setManage(w.id); setRate({ effective_from: '', rate: '' }) }}>Manage</button>}
         </article>
       ))}
       {add && (

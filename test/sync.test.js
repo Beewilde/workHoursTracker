@@ -185,3 +185,20 @@ test('a technical upload error keeps the change on the phone (only a real refusa
   assert.equal((await A.run()).state, 'ok')                                         // goes up once fixed
   assert.equal(srv.db.schedules.length, 1); assert.equal(srv.db.account_days.length, 1)
 })
+
+test('server refusals the database makes silently (blocked delete / settings) still roll back on the phone', async () => {
+  const srv = fakeServer(); srv.addHousehold(HH)
+  const A = phone(srv), B = phone(srv)
+  const w = (await A.call('POST', '/workers', { name: 'Alex', rate: 5 })).id
+  await A.call('PUT', '/day/2026-11-02', { entries: [day(w, '16:00', '20:30')] })
+  await A.run(); await B.run()
+  // B is a member: the database silently ignores its deletes of saved logs and its settings changes
+  srv.refuse = (t, r, op) => (t === 'entries' && op !== 'insert') || (t === 'households' && op === 'update') ? 'rls' : null
+  B.state.entries = []                                         // e.g. an older app version removing the log
+  B.state.settings.php_rate = 1
+  const st = await B.run()
+  assert.equal(st.state, 'warning')
+  assert.equal(B.state.entries.length, 1)                      // back
+  assert.equal(B.state.settings.php_rate ?? null, null)        // back to the organization's
+  assert.equal(srv.db.entries.length, 1)
+})

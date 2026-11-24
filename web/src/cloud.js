@@ -26,6 +26,23 @@ export const syncNow = () => sync?.sync()
 
 function stopSync() {
   cleanup.forEach((f) => f()); cleanup = []; sync = null
+  getEngine()?.setRole?.(null)
+}
+
+// this login's role in the organization ('owner' | 'editor' | 'viewer'): remembered for offline use,
+// refreshed from the server whenever possible (the owner may have removed someone)
+function applyRole(meta, role) {
+  if (role !== meta.role) { meta.role = role; saveMeta(meta) }
+  getEngine().setRole(role || 'editor')
+  emit({ role: role || 'editor' })
+}
+async function refreshRole(meta) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const rows = must(await supabase.from('household_members').select('role').eq('household_id', meta.household_id).eq('user_id', user.id))
+    applyRole(meta, rows[0]?.role || 'viewer')            // no row: removed from the organization → read only
+  } catch { /* offline: keep the remembered role */ }
 }
 
 function startSync(meta) {
@@ -33,6 +50,8 @@ function startSync(meta) {
   sync = createSync({ client: supabase, getState: () => getEngine().state, persist: (S) => persist(S, { remote: true }), meta, saveMeta })
   cleanup.push(sync.onStatus((s) => emit({ ...s, household_id: meta.household_id })))
   emit({ ...sync.status(), household_id: meta.household_id })
+  applyRole(meta, meta.role)
+  refreshRole(meta)
   // when to sync: shortly after every change made here, every minute while open,
   // when the phone gets signal back, and when the app comes back to the front
   let t = null
@@ -82,16 +101,22 @@ export async function listFamilies() {
 // first phone: this phone's existing data becomes the organization's data
 export async function createFamily(name) {
   const id = must(await supabase.rpc('create_household', { p_name: name.trim(), p_timezone: getEngine().state.settings.timezone }))
-  const meta = { household_id: id }; saveMeta(meta); startSync(meta)
+  const meta = { household_id: id, role: 'owner' }; saveMeta(meta); startSync(meta)
   return id
 }
 // other phones: this phone's data is replaced by the organization's
-async function useFamily(id) {
+async function useFamily(id, role) {
   getEngine().reset()
-  const meta = { household_id: id }; saveMeta(meta); startSync(meta)
+  const meta = { household_id: id, role }; saveMeta(meta); startSync(meta)
 }
-export async function joinFamily(code) { await useFamily(must(await supabase.rpc('join_household', { p_code: code }))) }
-export const openFamily = (id) => useFamily(id)
+export async function joinFamily(code) { await useFamily(must(await supabase.rpc('join_household', { p_code: code })), 'editor') }
+export const openFamily = (id, role) => useFamily(id, role)
+// who is in the organization (email, role, joined, last active); `me` marks this login
+export async function listMembers(id) {
+  const [{ data: { user } }, rows] = await Promise.all([supabase.auth.getUser(), supabase.rpc('list_members', { p_household: id }).then(must)])
+  return rows.map((r) => ({ ...r, me: r.user_id === user?.id }))
+}
+export async function removeMember(id, userId) { must(await supabase.rpc('remove_member', { p_household: id, p_user: userId })) }
 export async function newInviteCode(id) { return must(await supabase.rpc('new_invite_code', { p_household: id })) }
 
 // after "Erase all" or "Restore backup": forget what was uploaded, so the next sync MERGES with
@@ -99,7 +124,7 @@ export async function newInviteCode(id) { return must(await supabase.rpc('new_in
 export function forgetSyncedState() {
   const m = loadMeta()
   if (!m.household_id) return
-  const fresh = { household_id: m.household_id }
+  const fresh = { household_id: m.household_id, role: m.role }
   saveMeta(fresh)
   if (sync) startSync(fresh)
 }

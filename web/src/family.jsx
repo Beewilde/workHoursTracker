@@ -2,9 +2,12 @@
 import React, { useEffect, useState } from 'react'
 import { useToast, downloadBackup } from './lib.js'
 import { Page, Icon, Field, Loading } from './ui.jsx'
-import { cloudConfigured, onSyncStatus, syncStatus, signIn, createAccount, changePassword, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, syncNow } from './cloud.js'
+import { cloudConfigured, onSyncStatus, syncStatus, signIn, createAccount, changePassword, signOut, listFamilies, createFamily, joinFamily, openFamily, newInviteCode, listMembers, removeMember, syncNow } from './cloud.js'
 import { getEngine } from './storage.js'
 
+// can this phone change the organization's settings, workers, paid months and saved logs?
+// (not in an organization = it's all yours)
+export const canManage = (s) => !s.household_id || s.role == null || s.role === 'owner'
 export const useSyncStatus = () => {
   const [s, set] = useState(() => syncStatus())
   useEffect(() => onSyncStatus(set), [])
@@ -73,7 +76,7 @@ function ChooseFamily({ status }) {
     <>
       {fams.length > 0 && <Section title="Your organization">
         {fams.map((f) => <div key={f.id} className="pill-row" style={{ alignItems: 'center' }}><strong style={{ flex: 1 }}>{f.name}</strong>
-          <button className="primary-button small" disabled={busy} onClick={run(async () => { if (okToReplace()) await openFamily(f.id) })}>Open</button></div>)}
+          <button className="primary-button small" disabled={busy} onClick={run(async () => { if (okToReplace()) await openFamily(f.id, f.role) })}>Open</button></div>)}
       </Section>}
       <Section title="Join your organization">
         <p className="muted-text">Enter the invite code from whoever set up the organization (it’s on their Organization screen).</p>
@@ -106,6 +109,31 @@ export function AuthGate({ status }) {
   )
 }
 
+const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null)
+function Members({ fam }) {
+  const toast = useToast()
+  const [list, setList] = useState(null)
+  const load = () => listMembers(fam.id).then(setList).catch((e) => { toast(e.message, 'error'); setList([]) })
+  useEffect(() => { load() }, [fam.id])
+  const owner = fam.role === 'owner'
+  const remove = (m) => window.confirm(`Remove ${m.email} from ${fam.name}? They will stop seeing and syncing the records. Records they logged stay.`)
+    && removeMember(fam.id, m.user_id).then(() => { toast(`${m.email} removed`); load() }).catch((e) => toast(e.message, 'error'))
+  return (
+    <Section title={`Members${list ? ` (${list.length})` : ''}`}>
+      {!list ? <Loading /> : list.map((m) => (
+        <div key={m.user_id} className="pill-row" style={{ alignItems: 'center', margin: '0 0 10px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <strong style={{ wordBreak: 'break-all' }}>{m.email}{m.me ? ' (you)' : ''}</strong>
+            <p className="muted-text" style={{ margin: 0 }}>{m.role === 'owner' ? 'Owner' : m.role === 'viewer' ? 'Viewer' : 'Member'} · joined {shortDate(m.joined_at)}{m.last_sign_in_at ? ` · last signed in ${shortDate(m.last_sign_in_at)}` : ''}</p>
+          </div>
+          {owner && !m.me && m.role !== 'owner' && <button className="outline-button danger" onClick={() => remove(m)}>Remove</button>}
+        </div>
+      ))}
+      <p className="muted-text">{owner ? 'Removing someone stops them seeing the records. If they still have the invite code they could join again, so make a new code too.' : 'Only the owner can remove members.'}</p>
+    </Section>
+  )
+}
+
 function Synced({ status }) {
   const toast = useToast()
   const [fam, setFam] = useState(null)
@@ -126,6 +154,7 @@ function Synced({ status }) {
         <p style={{ fontSize: 28, letterSpacing: 4, margin: '10px 0' }}><strong>{fam.invite_code}</strong></p>
         {fam.role === 'owner' && <button className="outline-button" onClick={() => newInviteCode(fam.id).then((c) => { setFam({ ...fam, invite_code: c }); toast('New code made; the old one no longer works') }).catch((e) => toast(e.message, 'error'))}>Make a new code</button>}
       </Section>}
+      {fam && <Members fam={fam} />}
       <Section title="Your account"><ChangePassword /></Section>
       <button className="logout-button" onClick={() => { if (window.confirm('Sign out? This phone keeps its records but stops syncing.')) signOut() }}><Icon name="user" size={18} /> Sign out</button>
     </>

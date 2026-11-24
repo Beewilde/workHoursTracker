@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import { api, useLoad, useToast, $, peso, fetchPhpRate, h2, addMonths, fmtDate, monthLabel, downloadExport, downloadBackup, restoreBackup, eraseAll, loadDemo, storageInfo } from './lib.js'
 import { Page, Icon, Metric, Field, Loading, MonthNav, Avatar, useShell } from './ui.jsx'
 import { T } from './daily.jsx'
+import { useSyncStatus, canManage } from './family.jsx'
 
 export function FilesPage({ month, setMonth, workers, tab, setTab }) {
   const toast = useToast()
@@ -83,6 +84,7 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
   const [bonus, setBonus] = useState(null)
   const [lunch, setLunch] = useState(null)
   const [mon, setMon] = useState(null)
+  const manage = canManage(useSyncStatus())          // members can look but not change
   const [php, setPhp] = useState(null)
   if (!s || !sch || !meta) return <Page title="Settings" eyebrow="Preferences"><Loading /></Page>
   const P = presets || s.presets, B = bonus ?? s.default_review_bonus
@@ -96,6 +98,8 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
   return (
     <Page title="Settings" eyebrow="Preferences">
       <MonthNav month={month} setMonth={setMonth} />
+      {!manage && <div className="info-card"><Icon name="lock" size={18} /><div><strong>Only the organization owner can change these</strong><p>You can see the settings everyone uses. Dark mode below is just for your phone.</p></div></div>}
+      <fieldset className="plain-fieldset" disabled={!manage}>
       <section className="settings-group">
         <h2>{monthLabel(month)}</h2>
         <div className="block"><p className="field-label" style={{ marginBottom: 8 }}>Rest days</p></div>
@@ -165,10 +169,13 @@ export function SettingsPage({ month, setMonth, onChange, dark, setDark }) {
           <div style={{ alignSelf: 'end' }}><button className="primary-button small" onClick={() => put({ default_review_bonus: B }).then(() => setBonus(null))}>Save</button></div></div>
           <p className="muted-text" style={{ marginTop: 8 }}>Each review’s amount can still be changed when you add it.</p></div>
       </section>
+      </fieldset>
       <section className="settings-group">
         <h2>General</h2>
+        <fieldset className="plain-fieldset" disabled={!manage}>
         <div className="block"><Field label="Usual shift start (where typed hours begin)"><input type="time" defaultValue={s.shift_start || '16:00'} onBlur={(e) => e.target.value && e.target.value !== s.shift_start && put({ shift_start: e.target.value }, 'Shift start saved')} /></Field></div>
         <div className="block"><Field label="Timezone (decides what “today” is)"><input defaultValue={s.timezone} onBlur={(e) => e.target.value !== s.timezone && put({ timezone: e.target.value }, 'Timezone saved')} /></Field></div>
+        </fieldset>
         <label className="toggle-row"><span><strong>Dark mode</strong><small>Easier on the eyes at night</small></span><input type="checkbox" checked={dark} onChange={(e) => setDark(e.target.checked)} /><i /></label>
       </section>
       <section className="settings-group">
